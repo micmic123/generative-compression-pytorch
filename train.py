@@ -9,40 +9,44 @@ from models.model import Model
 
 
 parser = argparse.ArgumentParser()
-# parser.add_argument('--dataset', help='path for data path csv', default='./data/trainset.csv')
-# parser.add_argument('--batchsize', help='batch size for training', default=0, type=int)
-parser.add_argument('--config', help='config file', default='./configs/my_config.yaml', type=str)
+parser.add_argument('--config', help='config file path', type=str)
 parser.add_argument('--name', help='result dir name', default=datetime.now().strftime("%Y-%m-%d_%H_%M_%S"), type=str)
-parser.add_argument('--device', help='CUDA_VISIBLE_DEVICES NUMBER', default='3', type=str)
+parser.add_argument('--device', help='CUDA_VISIBLE_DEVICES number', default='3', type=str)
+parser.add_argument('--resume', help='snapshot path', type=str)
 args = parser.parse_args()
 
+
 os.environ['CUDA_VISIBLE_DEVICES'] = args.device
-
 base_dir, snapshot_dir, output_dir, log_path = make_dir(args)
-config = get_config(args.config)
 
+if not args.config:
+    if args.resume:
+        args.config = os.path.join(args.resume, 'config.yaml')
+    else:
+        args.config = './configs/config.yaml'
+
+config = get_config(args.config)
 train_dataloader, image_num = get_dataloader(config)
 config['image_num'] = image_num
-# if args.batchsize != 0:
-#     config['batchsize'] = args.batchsize
 
-model = Model(config)
-model.cuda()
-
-print(config)
-print('table shape:', model.table.table.shape)
+print(f'VISIBLE CUDA DEVICE: {args.device}')
+print('============== config ==============')
+print('[path]', args.config)
+for k, v in config.items():
+    print(f'{k}: ', v)
+print('====================================')
 
 itr = 0
+model = Model(config)
+if args.resume:
+    itr = model.load(args.resume)
+model.cuda()
+
+
 while True:
     for x, idx in train_dataloader:
         x, idx = x.cuda(), idx.cuda()
         t0 = time()
-        if 0 in idx:
-            with torch.no_grad():
-                iii = torch.tensor([0]).cuda()
-                print(idx)
-                print(model.table.table[iii])
-                print(model.table(iii))
 
         loss_D_real, loss_D_fake, loss_D = model.D_update(x, idx)
         loss_recon, loss_fm, loss_G_adv, loss_G = model.G_update(x, idx)

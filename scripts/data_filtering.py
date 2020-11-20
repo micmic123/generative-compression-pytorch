@@ -17,7 +17,7 @@ os.makedirs(target, exist_ok=True)
 for path in tqdm(paths):
     img = cv2.imread(path)
     H, W, C = img.shape
-    h, s, v = cv2.mean(cv2.cvtColor(img, cv2.COLOR_BGR2HSV))
+    h, s, v, _ = cv2.mean(cv2.cvtColor(img, cv2.COLOR_BGR2HSV)) / 255
     if max(H, W) < threshold_size or s > threshold_s or v > threshold_v:
         continue
     copy2(path, target)

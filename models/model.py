@@ -1,9 +1,11 @@
 import os
 import copy
+import math
 import torch
 import torch.nn.functional as F
 from torch import nn, optim
 from torch.optim import lr_scheduler
+import torch.nn.init as init
 from .blocks import ResBlock, ResBlocks, Conv2dBlock, UpConv2dBlock, LinearBlock
 from .quantizer import Quantizer
 from .discriminator import Discriminator
@@ -42,6 +44,7 @@ class Model(nn.Module):
             lr=config['lr_disc'], weight_decay=config['weight_decay'])
         self.encoder_test = copy.deepcopy(self.encoder)
         self.decoder_test = copy.deepcopy(self.decoder)
+        self.apply(weights_init(config['init']))
 
     def D_out_decompose(self, D_out):
         # D_out: (num_D, n_layers+2, (B, ., ., .) featmap)
@@ -118,31 +121,32 @@ class Model(nn.Module):
 
         return x_recon, x_recon2
 
-    def save(self, itr):
+    def save(self, snapshot_dir, itr):
         snapshot = {
             'itr': itr,
             'config': self.config,
             'encoder': self.encoder,
             'decoder': self.decoder.state_dict(),
-            'disc': self.disc.state_dict(),
-            'optimizer': self.optimizer.state_dict()
+            'dis': self.dis.state_dict(),
+            'encoder_opt': self.encoder_opt.state_dict(),
+            'decoder_opt': self.decoder_opt.state_dict(),
+            'dis_opt': self.dis_opt.state_dict()
         }
 
-        torch.save(snapshot, os.path.join(self.config['snapshot_dir'], f'itr_{itr:06}.pt'))
+        torch.save(snapshot, os.path.join(snapshot_dir, f'itr_{itr:07}.pt'))
 
     def load(self, path):
-        state = torch.load(path)
-        itr = state['itr']
-        self.config = state['config']
-        self.table.load_state_dict(state['table'])
-        self.G.load_state_dict(state['G'])
-        self.D.load_state_dict(state['D'])
-        self.optimizer.load_state_dict(state['optimizer'])
-        # self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=10, gamma=0.1, last_epoch=epoch)
+        snapshot = torch.load(path)
+        self.encoder.load_state_dict(snapshot['encoder'])
+        self.decoder.load_state_dict(snapshot['decoder'])
+        self.dis.load_state_dict(snapshot['dis'])
+        self.encoder_opt.load_state_dict(snapshot['encoder_opt'])
+        self.decoder_opt.load_state_dict(snapshot['decoder_opt'])
+        self.dis_opt.load_state_dict(snapshot['dis_opt'])
 
-        print(f'Loaded from iter: {itr}')
+        print(f'Loaded from itr: {snapshot["itr"]}.')
 
-        return itr
+        return snapshot['itr']
 
 
 class Encoder(nn.Module):
@@ -208,3 +212,25 @@ class Decoder(nn.Module):
         out = self.decoder(z_quantized)
 
         return out
+
+
+def weights_init(init_type='gaussian'):
+    def init_fun(m):
+        classname = m.__class__.__name__
+        if (classname.find('Conv') == 0 or classname.find(
+                'Linear') == 0) and hasattr(m, 'weight'):
+            if init_type == 'gaussian':
+                init.normal_(m.weight.data, 0.0, 0.02)
+            elif init_type == 'xavier':
+                init.xavier_normal_(m.weight.data, gain=math.sqrt(2))
+            elif init_type == 'kaiming':
+                init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
+            elif init_type == 'orthogonal':
+                init.orthogonal_(m.weight.data, gain=math.sqrt(2))
+            elif init_type == 'default':
+                pass
+            else:
+                assert 0, "Unsupported initialization: {}".format(init_type)
+            if hasattr(m, 'bias') and m.bias is not None:
+                init.constant_(m.bias.data, 0.0)
+    return init_fun

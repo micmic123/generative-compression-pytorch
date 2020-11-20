@@ -5,6 +5,7 @@ snapshot_save_itr: 5000      # How often do you want to save trained models
 log_itr: 1                    # How often do you want to log the training stats
 
 # optimization options
+init: kaiming
 max_iter: 100000              # maximum number of training iterations
 weight_decay: 0.0005          # weight decay
 lr_encoder: 0.0002

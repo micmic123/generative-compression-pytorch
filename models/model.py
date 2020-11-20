@@ -4,11 +4,12 @@ import math
 import torch
 import torch.nn.functional as F
 from torch import nn, optim
-from torch.optim import lr_scheduler
+# from torch.optim.lr_scheduler import StepLR
 import torch.nn.init as init
 from .blocks import ResBlock, ResBlocks, Conv2dBlock, UpConv2dBlock, LinearBlock
 from .quantizer import Quantizer
 from .discriminator import Discriminator
+from .vgg import VGG16
 
 
 # EMA
@@ -28,7 +29,10 @@ class Model(nn.Module):
         self.encoder = Encoder(config)
         self.decoder = Decoder(config)
         self.dis = Discriminator(config)
-        self.recon_criterion = nn.MSELoss()
+        self.vgg = VGG16()
+        self.vgg_weights = [1.0 / 32, 1.0 / 16, 1.0 / 8, 1.0 / 4, 1.0]
+        self.criterion = nn.MSELoss()
+        self.criterion_L1 = nn.L1Loss()
 
         encoder_params = list(self.encoder.parameters())
         decoder_params = list(self.decoder.parameters())
@@ -41,10 +45,14 @@ class Model(nn.Module):
             lr=config['lr_decoder'], weight_decay=config['weight_decay'])
         self.dis_opt = torch.optim.Adam(
             [p for p in dis_params if p.requires_grad],
-            lr=config['lr_disc'], weight_decay=config['weight_decay'])
+            lr=config['lr_dis'], weight_decay=config['weight_decay'])
+
         self.encoder_test = copy.deepcopy(self.encoder)
         self.decoder_test = copy.deepcopy(self.decoder)
         self.apply(weights_init(config['init']))
+
+    def get_scheduler(self):
+        return self.encoder_lr_sche, self.decoder_lr_sche, self.dis_lr_sche
 
     def D_out_decompose(self, D_out):
         # D_out: (num_D, n_layers+2, (B, ., ., .) featmap)
@@ -67,16 +75,24 @@ class Model(nn.Module):
         score_x, feat_x = self.D_out_decompose(self.D(x))
 
         # recon loss
-        self.loss_recon = self.recon_criterion(x_recon, x)
+        self.loss_recon = self.criterion(x_recon, x)
 
         # feature matching loss
-        self.loss_fm = torch.mean(torch.stack([self.recon_criterion(a, b) for a, b in zip(feat_recon, feat_x)]))
+        self.loss_fm = torch.mean(torch.stack([self.criterion(a, b) for a, b in zip(feat_recon, feat_x)]))
+
+        # VGG perceptual loss
+        x_vgg, x_recon_vgg = self.vgg(x), self.vgg(x_recon)
+        vgg_loss = 0
+        for i, (f1, f2) in enumerate(zip(x_vgg, x_recon_vgg)):
+            vgg_loss += self.vgg_weights[i] * self.criterion_L1(f1.detach(), f2)
+        self.vgg_loss = vgg_loss
+
 
         # adversarial loss
         self.loss_G_adv = torch.mean(torch.stack([F.mse_loss(score, torch.ones_like(score)) for score in score_recon]))
 
         self.loss_G = self.config['recon_w']*self.loss_recon + self.config['fm_w']*self.loss_fm + \
-                      self.config['adv_w']*self.loss_G_adv
+                      self.config['adv_w']*self.loss_G_adv + self.config['vgg_w']*self.vgg_loss
 
         self.loss_G.backward()
         self.encoder_opt.step()
@@ -86,18 +102,18 @@ class Model(nn.Module):
 
         return self.loss_recon.item(), self.loss_fm.item(), self.loss_G_adv.item(), self.loss_G.item()
 
-    def D_update(self, x, idx):
+    def D_update(self, x):
         self.dis_opt.zero_grad()
 
         with torch.no_grad():
-            z_quantized = self.encoder(idx)
+            z_quantized = self.encoder(x)
             x_recon = self.decoder(z_quantized)
         score_recon, feat_recon = self.D_out_decompose(self.D(x_recon))
         score_x, feat_x = self.D_out_decompose(self.D(x))
 
         # adversarial loss
-        self.loss_D_real = torch.mean(torch.stack([F.mse_loss(score, torch.ones_like(score)) for score in score_x]))
-        self.loss_D_fake = torch.mean(torch.stack([F.mse_loss(score, torch.zeros_like(score)) for score in score_recon]))
+        self.loss_D_real = torch.mean(torch.stack([self.criterion(score, torch.ones_like(score)) for score in score_x]))
+        self.loss_D_fake = torch.mean(torch.stack([self.criterion(score, torch.zeros_like(score)) for score in score_recon]))
         self.loss_D = self.config['adv_w']*torch.mean(self.loss_D_real + self.loss_D_fake)
 
         self.loss_D.backward()
@@ -105,7 +121,7 @@ class Model(nn.Module):
 
         return self.loss_D_real.item(), self.loss_D_fake.item(), self.loss_D.item()
 
-    def forward(self, x, idx, mode):
+    def forward(self, x, mode):
         print('Forward function not implemented.')
         pass
 

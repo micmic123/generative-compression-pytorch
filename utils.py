@@ -1,6 +1,7 @@
 import os
 import yaml
 import time
+from shutil import copy2
 from torchvision import utils as vutils
 import numpy as np
 from PIL import Image
@@ -11,21 +12,43 @@ def get_config(config):
         return yaml.load(stream, Loader=yaml.FullLoader)
 
 
-def make_dir(args):
+def init(args):
     base_dir = f'./results/{args.name}'
     snapshot_dir = os.path.join(base_dir, 'snapshots')
     output_dir = os.path.join(base_dir, 'outputs')
     log_path = os.path.join(base_dir, 'logs.log')
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(snapshot_dir, exist_ok=True)
+    config = get_config(args.config)
+    copy2(args.config, os.path.join(base_dir, 'config.yaml'))
 
-    return base_dir, snapshot_dir, output_dir, log_path
+    return base_dir, snapshot_dir, output_dir, log_path, config
+
+
+def write_loss(itr, model, train_writer):
+    members = [attr for attr in dir(model)
+               if ((not callable(getattr(model, attr))
+                    and not attr.startswith("__"))
+                   and ('loss' in attr
+                        or 'grad' in attr
+                        or 'nwd' in attr
+                        or 'accuracy' in attr))]
+    for m in members:
+        train_writer.add_scalar(m, getattr(model, m), itr)
 
 
 def save_image(tensor, path, nrow=4):
     grid = vutils.make_grid(tensor.cpu(), nrow=nrow)
     img = (127.5*(grid.float() + 1.0)).permute((1,2,0)).numpy().astype(np.uint8)
     Image.fromarray(img).save(path)
+
+
+def lr_schedule(optimizer, lr_original, beta=0.1):
+    lr = lr_original * beta
+    for param_group in optimizer.param_groups:
+        old_lr = param_group['lr']
+        if old_lr != lr:
+            param_group['lr'] = lr
 
 
 class LambdaLR():

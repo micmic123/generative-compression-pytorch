@@ -17,36 +17,36 @@ parser.add_argument('--resume', help='snapshot path', type=str)
 args = parser.parse_args()
 
 
+if not args.config:
+    if args.resume:
+        dir_path = '/'.join(args.resume.split('/')[:-2])
+        args.config = os.path.join(dir_path, 'config.yaml')
+    else:
+        args.config = './configs/config.yaml'
 os.environ['CUDA_VISIBLE_DEVICES'] = args.device
 base_dir, snapshot_dir, output_dir, log_path, config = init(args)
 train_writer = SummaryWriter(base_dir)
-
-if not args.config:
-    if args.resume:
-        args.config = os.path.join(args.resume, 'config.yaml')
-    else:
-        args.config = './configs/config.yaml'
-
 train_dataloader, image_num = get_dataloader(config)
 config['image_num'] = image_num
 
-print(f'VISIBLE CUDA DEVICE: {args.device}')
-print('============== config ==============')
-print('[path]', args.config)
+print('[device]', args.device)
+print('[config]', args.config)
+msg = f'======================= {args.name} ======================='
+print(msg)
 for k, v in config.items():
-    print(f'{k}: ', v)
-print('====================================')
+    print(f'  {k}: ', v)
+print('='*len(msg))
+print()
 
 itr = 0
 model = Model(config)
+model.cuda()
 if args.resume:
     itr = model.load(args.resume)
-model.cuda()
-
 
 while True:
     update_D = 1
-    for x, in train_dataloader:
+    for x in train_dataloader:
         x = x.cuda()
         t0 = time()
 
@@ -54,8 +54,7 @@ while True:
             loss_D_real, loss_D_fake, loss_D = model.D_update(x)
             update_D *= -1
             continue
-
-        loss_recon, loss_fm, loss_G_adv, loss_G = model.G_update(x)
+        loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_G = model.G_update(x)
         update_D *= -1
 
         elapsed_t = time() - t0
@@ -70,11 +69,15 @@ while True:
             write_loss(itr, model, train_writer)
 
         if itr % config['log_print_itr'] == 0:
-            print(f'[{itr:>6}] recon={loss_recon:>.4f} | fm={loss_fm:>.4f} | G_adv={loss_G_adv:>.4f} | G={loss_G:>.4f} | '
-                  f'D_real={loss_D_real:>.4f} | D_fake={loss_D_fake:>.4f} | D={loss_D:>.4f} ({elapsed_t:>.2f}s)')
+            print(f'[{itr:>6}] recon={loss_recon:>.4f} | fm={loss_fm:>.4f} | G_adv={loss_G_adv:>.4f} | '
+                  f'vgg={loss_vgg:>.4f} | G={loss_G:>.4f} | D_real={loss_D_real:>.4f} | D_fake={loss_D_fake:>.4f} | '
+                  f'D={loss_D:>.4f} ({elapsed_t:>.2f}s)')
 
         if itr % config['image_save_itr'] == 0:
             test_x = x[:4]
             test_x_recon, test_x_recon_ema = model.test(test_x)
             out = torch.cat([test_x.detach(), test_x_recon.detach(), test_x_recon_ema.detach()], dim=0)
-            save_image(out, f'{output_dir}/{itr}.png', nrow=4)
+            save_image(out, f'{output_dir}/{itr:>6}.png', nrow=4)
+
+        if itr % config['snapshot_save_itr'] == 0:
+            model.save(snapshot_dir, itr)

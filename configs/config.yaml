@@ -8,11 +8,11 @@ log_print_itr: 1
 # optimization options
 init: kaiming
 max_iter: 100000              # maximum number of training iterations
-weight_decay: 1e-6          # weight decay
+weight_decay: 0.000001        # weight decay
 lr_encoder: 0.0002
 lr_decoder: 0.0002                  # learning rate for the generator
 lr_dis: 0.0002                  # learning rate for the discriminator
-lr_shedule_step: 5e5
+lr_shedule_step: 500000
 adv_w: 1                      # weight of adversarial loss for image translation
 fm_w: 1                       # weight on distance between gan features of style and translated image
 recon_w: 10                   # weight of image reconstruction loss
@@ -32,7 +32,7 @@ dec_res_num: 9
 
 # data options
 dataset: ./data/trainset.csv
-batchsize: 1
+batchsize: 10
 image_num: 0
 image_shape: [3, 256, 256]
 worker_num: 4

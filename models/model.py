@@ -71,8 +71,8 @@ class Model(nn.Module):
 
         z_quantized = self.encoder(x)
         x_recon = self.decoder(z_quantized)
-        score_recon, feat_recon = self.D_out_decompose(self.D(x_recon))
-        score_x, feat_x = self.D_out_decompose(self.D(x))
+        score_recon, feat_recon = self.D_out_decompose(self.dis(x_recon))
+        score_x, feat_x = self.D_out_decompose(self.dis(x))
 
         # recon loss
         self.loss_recon = self.criterion(x_recon, x)
@@ -82,17 +82,17 @@ class Model(nn.Module):
 
         # VGG perceptual loss
         x_vgg, x_recon_vgg = self.vgg(x), self.vgg(x_recon)
-        vgg_loss = 0
+        loss_vgg = 0
         for i, (f1, f2) in enumerate(zip(x_vgg, x_recon_vgg)):
-            vgg_loss += self.vgg_weights[i] * self.criterion_L1(f1.detach(), f2)
-        self.vgg_loss = vgg_loss
+            loss_vgg += self.vgg_weights[i] * self.criterion_L1(f1.detach(), f2)
+        self.loss_vgg = loss_vgg
 
 
         # adversarial loss
-        self.loss_G_adv = torch.mean(torch.stack([F.mse_loss(score, torch.ones_like(score)) for score in score_recon]))
+        self.loss_G_adv = torch.mean(torch.stack([self.criterion(score, torch.ones_like(score)) for score in score_recon]))
 
         self.loss_G = self.config['recon_w']*self.loss_recon + self.config['fm_w']*self.loss_fm + \
-                      self.config['adv_w']*self.loss_G_adv + self.config['vgg_w']*self.vgg_loss
+                      self.config['adv_w']*self.loss_G_adv + self.config['vgg_w']*self.loss_vgg
 
         self.loss_G.backward()
         self.encoder_opt.step()
@@ -100,7 +100,7 @@ class Model(nn.Module):
         update_average(self.encoder_test, self.encoder)
         update_average(self.decoder_test, self.decoder)
 
-        return self.loss_recon.item(), self.loss_fm.item(), self.loss_G_adv.item(), self.loss_G.item()
+        return self.loss_recon.item(), self.loss_fm.item(), self.loss_G_adv.item(), self.loss_vgg, self.loss_G.item()
 
     def D_update(self, x):
         self.dis_opt.zero_grad()
@@ -108,8 +108,8 @@ class Model(nn.Module):
         with torch.no_grad():
             z_quantized = self.encoder(x)
             x_recon = self.decoder(z_quantized)
-        score_recon, feat_recon = self.D_out_decompose(self.D(x_recon))
-        score_x, feat_x = self.D_out_decompose(self.D(x))
+        score_recon, feat_recon = self.D_out_decompose(self.dis(x_recon))
+        score_x, feat_x = self.D_out_decompose(self.dis(x))
 
         # adversarial loss
         self.loss_D_real = torch.mean(torch.stack([self.criterion(score, torch.ones_like(score)) for score in score_x]))
@@ -130,7 +130,6 @@ class Model(nn.Module):
         with torch.no_grad():
             z_quantized = self.encoder(x)
             x_recon = self.decoder(z_quantized)
-
             z_quantized_ema = self.encoder_test(x)
             x_recon2 = self.decoder_test(z_quantized_ema)
         self.train()
@@ -141,20 +140,24 @@ class Model(nn.Module):
         snapshot = {
             'itr': itr,
             'config': self.config,
-            'encoder': self.encoder,
+            'encoder': self.encoder.state_dict(),
+            'encoder_test': self.encoder_test.state_dict(),
             'decoder': self.decoder.state_dict(),
+            'decoder_test': self.decoder_test.state_dict(),
             'dis': self.dis.state_dict(),
             'encoder_opt': self.encoder_opt.state_dict(),
             'decoder_opt': self.decoder_opt.state_dict(),
             'dis_opt': self.dis_opt.state_dict()
         }
 
-        torch.save(snapshot, os.path.join(snapshot_dir, f'itr_{itr:07}.pt'))
+        torch.save(snapshot, os.path.join(snapshot_dir, f'itr_{itr:06}.pt'))
 
     def load(self, path):
         snapshot = torch.load(path)
         self.encoder.load_state_dict(snapshot['encoder'])
+        self.encoder_test.load_state_dict(snapshot['encoder_test'])
         self.decoder.load_state_dict(snapshot['decoder'])
+        self.decoder_test.load_state_dict(snapshot['decoder_test'])
         self.dis.load_state_dict(snapshot['dis'])
         self.encoder_opt.load_state_dict(snapshot['encoder_opt'])
         self.decoder_opt.load_state_dict(snapshot['decoder_opt'])

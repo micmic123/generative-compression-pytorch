@@ -1,22 +1,21 @@
 # logger options
-image_save_itr: 50           # How often do you want to save output images during training
-image_display_itr: 100       # How often do you want to display output images during training
-snapshot_save_itr: 5000      # How often do you want to save trained models
+image_save_itr: 500          # How often do you want to save output images during training
+snapshot_save_itr: 30000     # How often do you want to save trained models
 log_itr: 1                   # How often do you want to log the training stats
 log_print_itr: 1
 
 # optimization options
 init: kaiming
-max_iter: 100000              # maximum number of training iterations
+max_iter: 1000000             # maximum number of training iterations
 weight_decay: 0.000001        # weight decay
-lr_encoder: 0.0002
-lr_decoder: 0.0002                  # learning rate for the generator
-lr_dis: 0.0002                  # learning rate for the discriminator
+lr_encoder: 0.00005
+lr_decoder: 0.00005           # learning rate for the generator
+lr_dis: 0.00005               # learning rate for the discriminator
 lr_shedule_step: 500000
 adv_w: 1                      # weight of adversarial loss for image translation
-fm_w: 1                       # weight on distance between gan features of style and translated image
+fm_w: 5                       # weight on distance between gan features of style and translated image
 recon_w: 10                   # weight of image reconstruction loss
-vgg_w: 1
+vgg_w: 5
 
 downscale_factor: 4
 
@@ -31,8 +30,10 @@ dec_up_channel: 960
 dec_res_num: 9
 
 # data options
-dataset: ./data/trainset.csv
+trainset: ./data/trainset.csv
+testset: ./data/testset.csv
 batchsize: 10
+batchsize_test: 4
 image_num: 0
 image_shape: [3, 256, 256]
-worker_num: 4
+worker_num: 2

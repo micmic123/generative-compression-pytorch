@@ -26,7 +26,8 @@ if not args.config:
 os.environ['CUDA_VISIBLE_DEVICES'] = args.device
 base_dir, snapshot_dir, output_dir, log_path, config = init(args)
 train_writer = SummaryWriter(base_dir)
-train_dataloader, image_num = get_dataloader(config)
+train_dataloader, image_num, test_dataloader = get_dataloader(config)
+test_loader = iter(test_dataloader)
 config['image_num'] = image_num
 
 print('[device]', args.device)
@@ -74,10 +75,18 @@ while True:
                   f'D={loss_D:>.4f} ({elapsed_t:>.2f}s)')
 
         if itr % config['image_save_itr'] == 0:
-            test_x = x[:4]
-            test_x_recon, test_x_recon_ema = model.test(test_x)
-            out = torch.cat([test_x.detach(), test_x_recon.detach(), test_x_recon_ema.detach()], dim=0)
-            save_image(out, f'{output_dir}/{itr:>6}.png', nrow=4)
+            x_train = x[:4]
+            x_train_recon, x_train_recon_ema = model.test(x_train)
+            out = torch.cat([x_train.detach(), x_train_recon.detach(), x_train_recon_ema.detach()], dim=0)
+            save_image(out, f'{output_dir}/{itr:>6}_train.png', nrow=4)
+
+            x_test, size = next(test_loader).cuda()
+            x_test_recon, x_test_recon_ema = model.test(x_test)
+            out = torch.cat([x_test.detach(), x_test_recon.detach(), x_test_recon_ema.detach()], dim=0)
+            save_image(out, f'{output_dir}/{itr:>6}_test.png', nrow=4)
+
+            print(f'x_train[0] bytes: {len(model.encode(x_train[0].unsqueeze(0)))}',
+                  f'x_test[0] bytes: {len(model.encode(x_train[0].unsqueeze(0)))}')
 
         if itr % config['snapshot_save_itr'] == 0:
             model.save(snapshot_dir, itr)

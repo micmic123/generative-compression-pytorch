@@ -1,6 +1,8 @@
 import os
 import copy
 import math
+import gzip
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn, optim
@@ -50,6 +52,7 @@ class Model(nn.Module):
         self.encoder_test = copy.deepcopy(self.encoder)
         self.decoder_test = copy.deepcopy(self.decoder)
         self.apply(weights_init(config['init']))
+        self.compressor = gzip
 
     def get_scheduler(self):
         return self.encoder_lr_sche, self.decoder_lr_sche, self.dis_lr_sche
@@ -166,6 +169,29 @@ class Model(nn.Module):
         print(f'Loaded from itr: {snapshot["itr"]}.')
 
         return snapshot['itr']
+
+    def encode(self, x):
+        self.eval()
+        with torch.no_grad():
+            z_quantized = self.encoder(x)
+        z_np = z_quantized.cpu().numpy().astype(np.int8)
+        z_compressed = self.compressor.compress(z_np)
+        self.train()
+
+        return z_compressed
+
+    def decode(self, z_compressed, cuda=True):
+        self.eval()
+        z_bytes = self.compressor.decompress(z_compressed)
+        z_np = np.frombuffer(z_bytes, dtype=np.int8)
+        z_quantized = torch.from_numpy(z_np).type(torch.float32)
+        if cuda:
+            z_quantized = z_quantized.cuda()
+        with torch.no_grad():
+            x_recon = self.decoder(z_quantized)
+        self.train()
+
+        return x_recon
 
 
 class Encoder(nn.Module):

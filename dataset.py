@@ -1,3 +1,4 @@
+import os
 import math
 import pandas as pd
 import numpy as np
@@ -12,11 +13,12 @@ CROP_SIZE = 256
 
 
 class OpenImageDataset(Dataset):
-    def __init__(self, path, transform=None):
+    def __init__(self, path, transform=None, mode='train'):
         df = pd.read_csv(path)
         self.paths = sorted(df['path'].tolist())
         self.transform = transform
-        print(f'[trainset] {len(self.paths)} images.')
+        self.mode = mode
+        print(f'[{mode}set] {len(self.paths)} images.')
 
     def __len__(self):
         return len(self.paths)
@@ -28,7 +30,10 @@ class OpenImageDataset(Dataset):
         if self.transform:
             img = self.transform(img)
 
-        return img
+        if self.mode == 'train':
+            return img
+        elif self.mode == 'test':
+            return img, os.path.getsize(self.paths[idx])
 
 
 # Resize the input PIL Image to the given size.
@@ -91,7 +96,10 @@ def get_dataloader(config):
         ])
     }
 
-    train_dataset = OpenImageDataset(config['dataset'], data_transforms['train'])
+    train_dataset = OpenImageDataset(config['trainset'], data_transforms['train'], mode='train')
     train_dataloader = DataLoader(train_dataset, batch_size=config['batchsize'], shuffle=True, num_workers=config['worker_num'])
 
-    return train_dataloader, len(train_dataset)
+    test_dataset = OpenImageDataset(config['testset'], data_transforms['train'], mode='test')
+    test_dataloader = DataLoader(test_dataset, batch_size=config['batchsize_test'], shuffle=True)
+
+    return train_dataloader, len(train_dataset), test_dataloader

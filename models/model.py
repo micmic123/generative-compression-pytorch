@@ -12,6 +12,7 @@ from .blocks import ResBlock, ResBlocks, Conv2dBlock, UpConv2dBlock, LinearBlock
 from .quantizer import Quantizer
 from .discriminator import Discriminator
 from .vgg import VGG16
+from .loss import Scharr
 
 
 # EMA
@@ -33,6 +34,7 @@ class Model(nn.Module):
         self.dis = Discriminator(config)
         self.vgg = VGG16()
         self.vgg_weights = [1.0 / 32, 1.0 / 16, 1.0 / 8, 1.0 / 4, 1.0]
+        self.scharr = Scharr()
         self.criterion = nn.MSELoss()
         self.criterion_L1 = nn.L1Loss()
 
@@ -90,12 +92,17 @@ class Model(nn.Module):
             loss_vgg += self.vgg_weights[i] * self.criterion_L1(f1.detach(), f2)
         self.loss_vgg = loss_vgg
 
+        # image gradient loss
+        x_grad = self.scharr(x)
+        x_recon_grad = self.scharr(x_recon)
+        self.loss_grad = self.criterion(x_grad, x_recon_grad)
 
         # adversarial loss
         self.loss_G_adv = torch.mean(torch.stack([self.criterion(score, torch.ones_like(score)) for score in score_recon]))
 
         self.loss_G = self.config['recon_w']*self.loss_recon + self.config['fm_w']*self.loss_fm + \
-                      self.config['adv_w']*self.loss_G_adv + self.config['vgg_w']*self.loss_vgg
+                      self.config['adv_w']*self.loss_G_adv + self.config['vgg_w']*self.loss_vgg + \
+                      self.config['grad_w']*self.loss_grad
 
         self.loss_G.backward()
         self.encoder_opt.step()
@@ -103,7 +110,8 @@ class Model(nn.Module):
         update_average(self.encoder_test, self.encoder)
         update_average(self.decoder_test, self.decoder)
 
-        return self.loss_recon.item(), self.loss_fm.item(), self.loss_G_adv.item(), self.loss_vgg, self.loss_G.item()
+        return self.loss_recon.item(), self.loss_fm.item(), self.loss_G_adv.item(), self.loss_vgg, self.loss_grad, \
+               self.loss_G.item()
 
     def D_update(self, x):
         self.dis_opt.zero_grad()
@@ -178,17 +186,40 @@ class Model(nn.Module):
         z_compressed = self.compressor.compress(z_np)
         self.train()
 
-        return z_compressed
+        return z_compressed, z_np.shape
 
-    def decode(self, z_compressed, cuda=True):
+    def encode_ema(self, x):
+        self.eval()
+        with torch.no_grad():
+            z_quantized = self.encoder_test(x)
+        z_np = z_quantized.cpu().numpy().astype(np.int8)
+        z_compressed = self.compressor.compress(z_np)
+        self.train()
+
+        return z_compressed, z_np.shape
+
+    def decode(self, z_compressed, shape=(1, 8, 16, 16), cuda=True):
         self.eval()
         z_bytes = self.compressor.decompress(z_compressed)
-        z_np = np.frombuffer(z_bytes, dtype=np.int8)
+        z_np = np.frombuffer(z_bytes, dtype=np.int8).reshape(shape).copy()
         z_quantized = torch.from_numpy(z_np).type(torch.float32)
         if cuda:
             z_quantized = z_quantized.cuda()
         with torch.no_grad():
             x_recon = self.decoder(z_quantized)
+        self.train()
+
+        return x_recon
+
+    def decode_ema(self, z_compressed, shape=(1, 8, 16, 16), cuda=True):
+        self.eval()
+        z_bytes = self.compressor.decompress(z_compressed)
+        z_np = np.frombuffer(z_bytes, dtype=np.int8).reshape(shape).copy()
+        z_quantized = torch.from_numpy(z_np).type(torch.float32)
+        if cuda:
+            z_quantized = z_quantized.cuda()
+        with torch.no_grad():
+            x_recon = self.decoder_test(z_quantized)
         self.train()
 
         return x_recon

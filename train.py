@@ -4,7 +4,7 @@ from time import time
 from datetime import datetime
 import torch
 from tensorboardX import SummaryWriter
-from utils import init, save_image, lr_schedule, write_loss
+from utils import init, save_grid, lr_schedule, write_loss
 from dataset import get_dataloader
 from models.model import Model
 
@@ -55,7 +55,7 @@ while True:
             loss_D_real, loss_D_fake, loss_D = model.D_update(x)
             update_D *= -1
             continue
-        loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_G = model.G_update(x)
+        loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_grad, loss_G = model.G_update(x)
         update_D *= -1
 
         elapsed_t = time() - t0
@@ -71,22 +71,26 @@ while True:
 
         if itr % config['log_print_itr'] == 0:
             print(f'[{itr:>6}] recon={loss_recon:>.4f} | fm={loss_fm:>.4f} | G_adv={loss_G_adv:>.4f} | '
-                  f'vgg={loss_vgg:>.4f} | G={loss_G:>.4f} | D_real={loss_D_real:>.4f} | D_fake={loss_D_fake:>.4f} | '
+                  f'vgg={loss_vgg:>.4f} | grad={loss_grad:>.4f} | G={loss_G:>.4f} | D_real={loss_D_real:>.4f} | D_fake={loss_D_fake:>.4f} | '
                   f'D={loss_D:>.4f} ({elapsed_t:>.2f}s)')
 
         if itr % config['image_save_itr'] == 0:
             x_train = x[:4]
             x_train_recon, x_train_recon_ema = model.test(x_train)
             out = torch.cat([x_train.detach(), x_train_recon.detach(), x_train_recon_ema.detach()], dim=0)
-            save_image(out, f'{output_dir}/{itr:>6}_train.png', nrow=4)
+            save_grid(out, f'{output_dir}/{itr:>6}_train.png', nrow=4)
 
-            x_test, size = next(test_loader).cuda()
+            x_test, size = next(test_loader)
+            x_test = x_test.cuda()
             x_test_recon, x_test_recon_ema = model.test(x_test)
             out = torch.cat([x_test.detach(), x_test_recon.detach(), x_test_recon_ema.detach()], dim=0)
-            save_image(out, f'{output_dir}/{itr:>6}_test.png', nrow=4)
+            save_grid(out, f'{output_dir}/{itr:>6}_test.png', nrow=4)
 
-            print(f'x_train[0] bytes: {len(model.encode(x_train[0].unsqueeze(0)))}',
-                  f'x_test[0] bytes: {len(model.encode(x_train[0].unsqueeze(0)))}')
+            z, z_shape = model.encode(x_train[0].unsqueeze(0))
+            z_test, z_ema_shape = model.encode(x_test[0].unsqueeze(0))
+
+            print(f'x_train[0] bytes: {len(z)}',
+                  f'x_test[0] bytes: {len(z_test)}')
 
         if itr % config['snapshot_save_itr'] == 0:
             model.save(snapshot_dir, itr)

@@ -84,16 +84,24 @@ class RandomResize:
         return img
 
 
+base_transform = transforms.Compose([
+    # ResizeLongerTo(768),
+    RandomResize(SCALE_MIN, SCALE_MAX, CROP_SIZE),
+    transforms.RandomCrop(CROP_SIZE),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))  # normalize to [-1, 1]
+])
+
+
+inference_transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))  # normalize to [-1, 1]
+])
+
 def get_dataloader(config):
     data_transforms = {
-        'train': transforms.Compose([
-            # ResizeLongerTo(768),
-            RandomResize(SCALE_MIN, SCALE_MAX, CROP_SIZE),
-            transforms.RandomCrop(CROP_SIZE),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))  # normalize to [-1, 1]
-        ])
+        'train': base_transform
     }
 
     train_dataset = OpenImageDataset(config['trainset'], data_transforms['train'], mode='train')

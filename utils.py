@@ -37,9 +37,19 @@ def write_loss(itr, model, train_writer):
         train_writer.add_scalar(m, getattr(model, m), itr)
 
 
-def save_image(tensor, path, nrow=4):
+def denormalize(img):
+    return (127.5*(img.float() + 1.0)).permute((1,2,0)).numpy().astype(np.uint8)
+
+
+def save_image(tensor, path):
+    tensor = tensor.cpu()
+    img = denormalize(tensor)
+    Image.fromarray(img).save(path)
+
+
+def save_grid(tensor, path, nrow=4):
     grid = vutils.make_grid(tensor.cpu(), nrow=nrow)
-    img = (127.5*(grid.float() + 1.0)).permute((1,2,0)).numpy().astype(np.uint8)
+    img = denormalize(grid)
     Image.fromarray(img).save(path)
 
 

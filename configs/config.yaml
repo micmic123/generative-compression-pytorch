@@ -16,6 +16,7 @@ adv_w: 1                      # weight of adversarial loss for image translation
 fm_w: 5                       # weight on distance between gan features of style and translated image
 recon_w: 10                   # weight of image reconstruction loss
 vgg_w: 5
+grad_w: 1
 
 downscale_factor: 4
 

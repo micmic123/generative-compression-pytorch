@@ -2,6 +2,7 @@ import os
 import copy
 import math
 import gzip
+from random import randint
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -38,6 +39,9 @@ class Model(nn.Module):
         self.criterion = nn.MSELoss()
         self.criterion_L1 = nn.L1Loss()
 
+        self.is_mask = True if config['mask'] == 1 else False
+        self.C_level = config['C_level'] if self.is_mask else None
+
         encoder_params = list(self.encoder.parameters())
         decoder_params = list(self.decoder.parameters())
         dis_params = list(self.dis.parameters())
@@ -55,6 +59,7 @@ class Model(nn.Module):
         self.decoder_test = copy.deepcopy(self.decoder)
         self.apply(weights_init(config['init']))
         self.compressor = gzip
+        self.itr = 0
 
     def get_scheduler(self):
         return self.encoder_lr_sche, self.decoder_lr_sche, self.dis_lr_sche
@@ -75,6 +80,13 @@ class Model(nn.Module):
         self.decoder_opt.zero_grad()
 
         z_quantized = self.encoder(x)
+        mask_size = self.config['C']
+        if self.is_mask:
+            mask_size = self.C_level[randint(0, len(self.C_level)-1)]
+            mask = torch.zeros_like(z_quantized, requires_grad=False).cuda()
+            mask[:, :mask_size] = 1.
+            z_quantized = z_quantized * mask
+
         x_recon = self.decoder(z_quantized)
         score_recon, feat_recon = self.D_out_decompose(self.dis(x_recon))
         score_x, feat_x = self.D_out_decompose(self.dis(x))
@@ -111,13 +123,18 @@ class Model(nn.Module):
         update_average(self.decoder_test, self.decoder)
 
         return self.loss_recon.item(), self.loss_fm.item(), self.loss_G_adv.item(), self.loss_vgg, self.loss_grad, \
-               self.loss_G.item()
+               self.loss_G.item(), mask_size
 
     def D_update(self, x):
         self.dis_opt.zero_grad()
 
         with torch.no_grad():
             z_quantized = self.encoder(x)
+            if self.is_mask:
+                mask_size = self.C_level[randint(0, len(self.C_level)-1)]
+                mask = torch.zeros_like(z_quantized, requires_grad=False).cuda()
+                mask[:, :mask_size] = 1.
+                z_quantized = z_quantized * mask
             x_recon = self.decoder(z_quantized)
         score_recon, feat_recon = self.D_out_decompose(self.dis(x_recon))
         score_x, feat_x = self.D_out_decompose(self.dis(x))
@@ -139,17 +156,41 @@ class Model(nn.Module):
     def test(self, x):
         self.eval()
         with torch.no_grad():
-            z_quantized = self.encoder(x)
+            if self.is_mask:
+                x = x[0].unsqueeze(0).repeat((len(self.C_level), 1, 1, 1))
+                z_quantized = self.encoder(x)
+                z_quantized_ema = self.encoder_test(x)
+                masks = []
+                for mask_size in self.C_level:
+                    mask = torch.zeros(z_quantized.shape[1:], requires_grad=False)
+                    mask[:mask_size] = 1.
+                    masks.append(mask)
+                masks = torch.stack(masks).cuda()
+                z_quantized = z_quantized * masks
+                z_quantized_ema = z_quantized_ema * masks
+
+                # print size
+                z_np = z_quantized.cpu().numpy().astype(np.int8)
+                z_ema_np = z_quantized_ema.cpu().numpy().astype(np.int8)
+                for i, level in enumerate(self.C_level):
+                    z_comp = self.compressor.compress(z_np[i][:level])
+                    z_comp2 = self.compressor.compress(z_np[i])
+                    z_ema_comp = self.compressor.compress(z_ema_np[i][:level])
+                    z_ema_comp2 = self.compressor.compress(z_ema_np[i])
+                    print(f'C_level {level:>3}: {len(z_comp)}({len(z_comp2)}) bytes, '
+                          f'{len(z_ema_comp)}({len(z_ema_comp2)}) bytes')
+            else:
+                z_quantized = self.encoder(x)
+                z_quantized_ema = self.encoder_test(x)
             x_recon = self.decoder(z_quantized)
-            z_quantized_ema = self.encoder_test(x)
-            x_recon2 = self.decoder_test(z_quantized_ema)
+            x_recon_ema = self.decoder_test(z_quantized_ema)
         self.train()
 
-        return x_recon, x_recon2
+        return x, x_recon, x_recon_ema
 
-    def save(self, snapshot_dir, itr):
+    def save(self, snapshot_dir, filename):
         snapshot = {
-            'itr': itr,
+            'itr': self.itr,
             'config': self.config,
             'encoder': self.encoder.state_dict(),
             'encoder_test': self.encoder_test.state_dict(),
@@ -161,10 +202,11 @@ class Model(nn.Module):
             'dis_opt': self.dis_opt.state_dict()
         }
 
-        torch.save(snapshot, os.path.join(snapshot_dir, f'itr_{itr:06}.pt'))
+        torch.save(snapshot, os.path.join(snapshot_dir, filename))
 
     def load(self, path):
         snapshot = torch.load(path)
+        self.itr = snapshot['itr']
         self.encoder.load_state_dict(snapshot['encoder'])
         self.encoder_test.load_state_dict(snapshot['encoder_test'])
         self.decoder.load_state_dict(snapshot['decoder'])
@@ -174,9 +216,7 @@ class Model(nn.Module):
         self.decoder_opt.load_state_dict(snapshot['decoder_opt'])
         self.dis_opt.load_state_dict(snapshot['dis_opt'])
 
-        print(f'Loaded from itr: {snapshot["itr"]}.')
-
-        return snapshot['itr']
+        print(f'Loaded from itr: {self.itr}.')
 
     def encode(self, x):
         self.eval()

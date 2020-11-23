@@ -1,5 +1,6 @@
 import os
 import argparse
+import atexit
 from time import time
 from datetime import datetime
 import torch
@@ -29,6 +30,8 @@ train_writer = SummaryWriter(base_dir)
 train_dataloader, image_num, test_dataloader = get_dataloader(config)
 test_loader = iter(test_dataloader)
 config['image_num'] = image_num
+if config['mask'] == 1:
+    config['C'] = config['C_level'][-1]
 
 print('[device]', args.device)
 print('[config]', args.config)
@@ -39,14 +42,18 @@ for k, v in config.items():
 print('='*len(msg))
 print()
 
-itr = 0
+
 model = Model(config)
 model.cuda()
+
 if args.resume:
-    itr = model.load(args.resume)
+    model.load(args.resume)
+
+# atexit.register(model.save, snapshot_dir)
 
 while True:
     update_D = 1
+
     for x in train_dataloader:
         x = x.cuda()
         t0 = time()
@@ -55,42 +62,48 @@ while True:
             loss_D_real, loss_D_fake, loss_D = model.D_update(x)
             update_D *= -1
             continue
-        loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_grad, loss_G = model.G_update(x)
+        loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_grad, loss_G, mask_size = model.G_update(x)
         update_D *= -1
 
         elapsed_t = time() - t0
-        itr += 1
+        model.itr += 1
 
-        if itr % config['lr_shedule_step'] == 0:
+        if model.itr % config['lr_shedule_step'] == 0:
             lr_schedule(model.encoder_opt, config['lr_encoder'])
             lr_schedule(model.decoder_opt, config['lr_decoder'])
             lr_schedule(model.dis_opt, config['lr_dis'])
 
-        if itr % config['log_itr'] == 0:
-            write_loss(itr, model, train_writer)
+        if model.itr % config['log_itr'] == 0:
+            write_loss(model.itr, model, train_writer)
 
-        if itr % config['log_print_itr'] == 0:
-            print(f'[{itr:>6}] recon={loss_recon:>.4f} | fm={loss_fm:>.4f} | G_adv={loss_G_adv:>.4f} | '
-                  f'vgg={loss_vgg:>.4f} | grad={loss_grad:>.4f} | G={loss_G:>.4f} | D_real={loss_D_real:>.4f} | D_fake={loss_D_fake:>.4f} | '
-                  f'D={loss_D:>.4f} ({elapsed_t:>.2f}s)')
+        if model.itr % config['log_print_itr'] == 0:
+            print(f'[{model.itr:>6}] recon={loss_recon:>.4f} | fm={loss_fm:>.4f} | G_adv={loss_G_adv:>.4f} | '
+                  f'vgg={loss_vgg:>.4f} | grad={loss_grad:>.4f} | G={loss_G:>.4f} | D_real={loss_D_real:>.4f} | '
+                  f'D_fake={loss_D_fake:>.4f} | D={loss_D:>.4f} {mask_size:>3} ({elapsed_t:>.2f}s)')
 
-        if itr % config['image_save_itr'] == 0:
-            x_train = x[:4]
-            x_train_recon, x_train_recon_ema = model.test(x_train)
+        if model.itr % config['image_save_itr'] == 0:
+            x_train = x[:config['batchsize_test']]
+            x_train, x_train_recon, x_train_recon_ema = model.test(x_train)
             out = torch.cat([x_train.detach(), x_train_recon.detach(), x_train_recon_ema.detach()], dim=0)
-            save_grid(out, f'{output_dir}/{itr:>6}_train.png', nrow=4)
+            save_grid(out, f'{output_dir}/{model.itr:>6}_train.png', nrow=4)
 
-            x_test, size = next(test_loader)
+            try:
+                x_test, size = next(test_loader)
+            except StopIteration:
+                test_loader = iter(test_dataloader)
+                x_test, size = next(test_loader)
             x_test = x_test.cuda()
-            x_test_recon, x_test_recon_ema = model.test(x_test)
+            x_test, x_test_recon, x_test_recon_ema = model.test(x_test)
             out = torch.cat([x_test.detach(), x_test_recon.detach(), x_test_recon_ema.detach()], dim=0)
-            save_grid(out, f'{output_dir}/{itr:>6}_test.png', nrow=4)
+            save_grid(out, f'{output_dir}/{model.itr:>6}_test.png', nrow=4)
 
             z, z_shape = model.encode(x_train[0].unsqueeze(0))
             z_test, z_ema_shape = model.encode(x_test[0].unsqueeze(0))
 
-            print(f'x_train[0] bytes: {len(z)}',
-                  f'x_test[0] bytes: {len(z_test)}')
+            if not config['mask']:
+                print(f'x_train[0]: {len(z)}bytes, x_test[0]: {len(z_test)}bytes')
 
-        if itr % config['snapshot_save_itr'] == 0:
-            model.save(snapshot_dir, itr)
+        if model.itr % config['snapshot_latest_save_itr'] == 0:
+            model.save(snapshot_dir, 'latest.pt')
+        elif model.itr % config['snapshot_save_itr'] == 0:
+            model.save(snapshot_dir, f'itr_{model.itr:06}.pt')

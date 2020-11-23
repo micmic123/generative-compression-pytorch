@@ -1,3 +1,5 @@
 .idea
 *.pt
 __pycache__
+note.txt
+expr

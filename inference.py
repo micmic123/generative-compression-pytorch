@@ -56,8 +56,8 @@ for path in paths:
     x_recon_ema = model.decode_ema(z_ema, shape=z_ema_shape)
 
     elapsed_t = time() - t0
-    save_image(x_recon.squeeze().detach(), os.path.join(example_dir, f'{os.path.basename(path)}_{model.itr:>6}.png'))
-    save_image(x_recon_ema.squeeze().detach(), os.path.join(example_dir, f'{os.path.basename(path)}_{model.itr:>6}_ema.png'))
+    save_image(x_recon.squeeze().detach(), os.path.join(example_dir, f'{os.path.basename(path)}_{model.itr:08}.png'))
+    save_image(x_recon_ema.squeeze().detach(), os.path.join(example_dir, f'{os.path.basename(path)}_{model.itr:08}_ema.png'))
     print(f'elapsed time: {elapsed_t:>.4f}s')
     print(f'z: {len(z)} bytes, z_ema: {len(z_ema)} bytes')
 

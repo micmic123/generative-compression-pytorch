@@ -85,7 +85,7 @@ while True:
             x_train = x[:config['batchsize_test']]
             x_train, x_train_recon, x_train_recon_ema = model.test(x_train)
             out = torch.cat([x_train.detach(), x_train_recon.detach(), x_train_recon_ema.detach()], dim=0)
-            save_grid(out, f'{output_dir}/{model.itr:>6}_train.png', nrow=4)
+            save_grid(out, f'{output_dir}/{model.itr:08}_train.png', nrow=4)
 
             try:
                 x_test, size = next(test_loader)
@@ -95,7 +95,7 @@ while True:
             x_test = x_test.cuda()
             x_test, x_test_recon, x_test_recon_ema = model.test(x_test)
             out = torch.cat([x_test.detach(), x_test_recon.detach(), x_test_recon_ema.detach()], dim=0)
-            save_grid(out, f'{output_dir}/{model.itr:>6}_test.png', nrow=4)
+            save_grid(out, f'{output_dir}/{model.itr:08}_test.png', nrow=4)
 
             z, z_shape = model.encode(x_train[0].unsqueeze(0))
             z_test, z_ema_shape = model.encode(x_test[0].unsqueeze(0))
@@ -103,7 +103,7 @@ while True:
             if not config['mask']:
                 print(f'x_train[0]: {len(z)}bytes, x_test[0]: {len(z_test)}bytes')
 
-        if model.itr % config['snapshot_latest_save_itr'] == 0:
+        if model.itr % config['snapshot_save_itr'] == 0:
+            model.save(snapshot_dir, f'itr_{model.itr:08}.pt')
+        elif model.itr % config['snapshot_latest_save_itr'] == 0:
             model.save(snapshot_dir, 'latest.pt')
-        elif model.itr % config['snapshot_save_itr'] == 0:
-            model.save(snapshot_dir, f'itr_{model.itr:06}.pt')

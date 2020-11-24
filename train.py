@@ -59,10 +59,14 @@ while True:
         t0 = time()
 
         if update_D == 1:
-            loss_D_real, loss_D_fake, loss_D = model.D_update(x)
+            loss_D_real, loss_D_fake1, loss_D_fake2, loss_D = model.D_update(x)
             update_D *= -1
             continue
-        loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_grad, loss_G, mask_size = model.G_update(x)
+        loss_recon1, loss_recon2, \
+        loss_fm1, loss_fm2, \
+        loss_G_adv1, loss_G_adv2, \
+        loss_vgg1, loss_vgg2, \
+        loss_G = model.G_update(x)
         update_D *= -1
 
         elapsed_t = time() - t0
@@ -77,14 +81,19 @@ while True:
             write_loss(model.itr, model, train_writer)
 
         if model.itr % config['log_print_itr'] == 0:
-            print(f'[{model.itr:>6}] recon={loss_recon:>.4f} | fm={loss_fm:>.4f} | G_adv={loss_G_adv:>.4f} | '
-                  f'vgg={loss_vgg:>.4f} | grad={loss_grad:>.4f} | G={loss_G:>.4f} | D_real={loss_D_real:>.4f} | '
-                  f'D_fake={loss_D_fake:>.4f} | D={loss_D:>.4f} {mask_size:>3} ({elapsed_t:>.2f}s)')
+            print(f'[{model.itr:>6}] '
+                  f'recon={loss_recon1:>.4f} | recon={loss_recon2:>.4f} | '
+                  f'fm={loss_fm1:>.4f} | fm={loss_fm2:>.4f} | '
+                  f'G_adv={loss_G_adv1:>.4f} | G_adv={loss_G_adv2:>.4f} | '
+                  f'vgg={loss_vgg1:>.4f} | vgg={loss_vgg1:>.4f} | '
+                  f'D_real={loss_D_real:>.4f} | '
+                  f'D_fake={loss_D_fake1:>.4f} | D_fake={loss_D_fake2:>.4f} | '
+                  f'D={loss_D:>.4f} ({elapsed_t:>.2f}s)')
 
         if model.itr % config['image_save_itr'] == 0:
             x_train = x[:config['batchsize_test']]
-            x_train, x_train_recon, x_train_recon_ema = model.test(x_train)
-            out = torch.cat([x_train.detach(), x_train_recon.detach(), x_train_recon_ema.detach()], dim=0)
+            x, x_recon1, x_recon2, x_recon1_ema, x_recon2_ema = model.test(x_train)
+            out = torch.cat([x_train.detach(), x_recon1.detach(), x_recon2.detach(), x_recon1_ema.detach(), x_recon2_ema.detach()], dim=0)
             save_grid(out, f'{output_dir}/{model.itr:08}_train.png', nrow=4)
 
             try:
@@ -94,14 +103,14 @@ while True:
                 x_test, size = next(test_loader)
             x_test = x_test.cuda()
             x, x_recon1, x_recon2, x_recon1_ema, x_recon2_ema = model.test(x_test)
-            out = torch.cat([x_test.detach(), x_test_recon.detach(), x_test_recon_ema.detach()], dim=0)
+            out = torch.cat([x_test.detach(), x_recon1.detach(), x_recon2.detach(), x_recon1_ema.detach(), x_recon2_ema.detach()], dim=0)
             save_grid(out, f'{output_dir}/{model.itr:08}_test.png', nrow=4)
 
-            z, z_shape = model.encode(x_train[0].unsqueeze(0))
-            z_test, z_ema_shape = model.encode(x_test[0].unsqueeze(0))
-
-            if not config['mask']:
-                print(f'x_train[0]: {len(z)}bytes, x_test[0]: {len(z_test)}bytes')
+            # z, z_shape = model.encode(x_train[0].unsqueeze(0))
+            # z_test, z_ema_shape = model.encode(x_test[0].unsqueeze(0))
+            #
+            # if not config['mask']:
+            #     print(f'x_train[0]: {len(z)}bytes, x_test[0]: {len(z_test)}bytes')
 
         if model.itr % config['snapshot_save_itr'] == 0:
             model.save(snapshot_dir, f'itr_{model.itr:08}.pt')

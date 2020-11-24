@@ -97,7 +97,12 @@ class Model(nn.Module):
         # recon loss
         self.loss_recon1 = self.criterion(x_recon1, x)
         self.loss_recon2 = self.criterion(x_recon2, x-x_recon1)
-        self.loss_recon_rank = self.criterion_ranking(self.loss_recon2, self.loss_recon1, torch.tensor([-1]).float())
+        def mse(x, y):
+            return ((x - y) ** 2)
+
+        self.loss_recon_rank = self.criterion_ranking(mse(x_recon1, x),
+                                                      mse(x_recon2, x-x_recon1),
+                                                      -torch.ones_like(x_recon1))
         self.loss_recon = (self.loss_recon1 + self.loss_recon2 + self.loss_recon_rank) / 3
 
         # feature matching loss
@@ -109,9 +114,10 @@ class Model(nn.Module):
         x_vgg, x_recon1_vgg, x_recon2_vgg = self.vgg(x), self.vgg(x_recon1), self.vgg(x_recon2 + x_recon1)
         loss_vgg1 = 0
         loss_vgg2 = 0
-        for i, (f1, f2), (ff1, ff2) in enumerate(zip(x_vgg, x_recon1_vgg, x_recon2_vgg)):
+        for i, (f1, f2)in enumerate(zip(x_vgg, x_recon1_vgg)):
             loss_vgg1 += self.vgg_weights[i] * self.criterion_L1(f1.detach(), f2)
-            loss_vgg2 += self.vgg_weights[i] * self.criterion_L1(ff1.detach(), ff2)
+        for i, (f1, f2)in enumerate(zip(x_vgg, x_recon2_vgg)):
+            loss_vgg2 += self.vgg_weights[i] * self.criterion_L1(f1.detach(), f2)
         self.loss_vgg = (loss_vgg1 + loss_vgg2) / 2
 
         # adversarial loss
@@ -168,7 +174,6 @@ class Model(nn.Module):
         self.eval()
         with torch.no_grad():
             size = self.config['C']
-            x = x[0].unsqueeze(0)
 
             z_quantized = self.encoder(x)
             z1 = z_quantized[:, :size // 2]
@@ -187,11 +192,11 @@ class Model(nn.Module):
             z_comp = self.compressor.compress(z_np)
             z_comp2 = self.compressor.compress(z1_np)
 
-            print(f'{len(z_comp)}({len(z_comp2)}) bytes')
+            print(f'{len(z_comp)/self.config["batchsize_test"]}({len(z_comp2)/self.config["batchsize_test"]}) bytes')
 
         self.train()
 
-        return x, x_recon1, x_recon2, x_recon1_ema, x_recon2_ema
+        return x, x_recon1, x_recon2+x_recon1, x_recon1_ema, x_recon2_ema+x_recon1_ema
 
     def save(self, snapshot_dir, filename):
         snapshot = {

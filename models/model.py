@@ -98,11 +98,11 @@ class Model(nn.Module):
         self.loss_recon1 = self.criterion(x_recon1, x)
         self.loss_recon2 = self.criterion(x_recon2, x-x_recon1)
         def mse(x, y):
-            return ((x - y) ** 2)
+            return ((x - y) ** 2).mean(dim=[1,2,3])
 
         self.loss_recon_rank = self.criterion_ranking(mse(x_recon1, x),
                                                       mse(x_recon2, x-x_recon1),
-                                                      -torch.ones_like(x_recon1))
+                                                      -torch.ones(x_recon1.shape[0]).cuda())
         self.loss_recon = (self.loss_recon1 + self.loss_recon2 + self.loss_recon_rank) / 3
 
         # feature matching loss

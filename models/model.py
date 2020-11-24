@@ -29,6 +29,7 @@ def update_average(model_tgt, model_src, beta=0.999):
 class Model(nn.Module):
     def __init__(self, config):
         super(Model, self).__init__()
+        assert config['res'] == 1
         self.config = config
         self.encoder = Encoder(config)
         self.decoder = Decoder(config)
@@ -38,9 +39,12 @@ class Model(nn.Module):
         self.scharr = Scharr()
         self.criterion = nn.MSELoss()
         self.criterion_L1 = nn.L1Loss()
+        self.criterion_ranking = nn.MarginRankingLoss(config['margin'])
 
         self.is_mask = True if config['mask'] == 1 else False
         self.C_level = config['C_level'] if self.is_mask else None
+
+        self.is_res = True if config['res'] == 1 else False
 
         encoder_params = list(self.encoder.parameters())
         decoder_params = list(self.decoder.parameters())
@@ -80,41 +84,43 @@ class Model(nn.Module):
         self.decoder_opt.zero_grad()
 
         z_quantized = self.encoder(x)
-        mask_size = self.config['C']
-        if self.is_mask:
-            mask_size = self.C_level[randint(0, len(self.C_level)-1)]
-            mask = torch.zeros_like(z_quantized, requires_grad=False).cuda()
-            mask[:, :mask_size] = 1.
-            z_quantized = z_quantized * mask
+        size = self.config['C']
+        z1 = z_quantized[:, :size//2]
+        z2 = z_quantized[:, size//2:]
 
-        x_recon = self.decoder(z_quantized)
-        score_recon, feat_recon = self.D_out_decompose(self.dis(x_recon))
+        x_recon1 = self.decoder(z1)
+        x_recon2 = self.decoder(z2)
+        score_recon1, feat_recon1 = self.D_out_decompose(self.dis(x_recon1))
+        score_recon2, feat_recon2 = self.D_out_decompose(self.dis(x_recon2 + x_recon1))
         score_x, feat_x = self.D_out_decompose(self.dis(x))
 
         # recon loss
-        self.loss_recon = self.criterion(x_recon, x)
+        self.loss_recon1 = self.criterion(x_recon1, x)
+        self.loss_recon2 = self.criterion(x_recon2, x-x_recon1)
+        self.loss_recon_rank = self.criterion_ranking(self.loss_recon2, self.loss_recon1, torch.tensor([-1]).float())
+        self.loss_recon = (self.loss_recon1 + self.loss_recon2 + self.loss_recon_rank) / 3
 
         # feature matching loss
-        self.loss_fm = torch.mean(torch.stack([self.criterion(a, b) for a, b in zip(feat_recon, feat_x)]))
+        self.loss_fm1 = torch.mean(torch.stack([self.criterion(a, b) for a, b in zip(feat_recon1, feat_x)]))
+        self.loss_fm2 = torch.mean(torch.stack([self.criterion(a, b) for a, b in zip(feat_recon2, feat_x)]))
+        self.loss_fm = (self.loss_fm1 + self.loss_fm2) / 2
 
         # VGG perceptual loss
-        x_vgg, x_recon_vgg = self.vgg(x), self.vgg(x_recon)
-        loss_vgg = 0
-        for i, (f1, f2) in enumerate(zip(x_vgg, x_recon_vgg)):
-            loss_vgg += self.vgg_weights[i] * self.criterion_L1(f1.detach(), f2)
-        self.loss_vgg = loss_vgg
-
-        # image gradient loss
-        x_grad = self.scharr(x)
-        x_recon_grad = self.scharr(x_recon)
-        self.loss_grad = self.criterion(x_grad, x_recon_grad)
+        x_vgg, x_recon1_vgg, x_recon2_vgg = self.vgg(x), self.vgg(x_recon1), self.vgg(x_recon2 + x_recon1)
+        loss_vgg1 = 0
+        loss_vgg2 = 0
+        for i, (f1, f2), (ff1, ff2) in enumerate(zip(x_vgg, x_recon1_vgg, x_recon2_vgg)):
+            loss_vgg1 += self.vgg_weights[i] * self.criterion_L1(f1.detach(), f2)
+            loss_vgg2 += self.vgg_weights[i] * self.criterion_L1(ff1.detach(), ff2)
+        self.loss_vgg = (loss_vgg1 + loss_vgg2) / 2
 
         # adversarial loss
-        self.loss_G_adv = torch.mean(torch.stack([self.criterion(score, torch.ones_like(score)) for score in score_recon]))
+        self.loss_G_adv1 = torch.mean(torch.stack([self.criterion(score, torch.ones_like(score)) for score in score_recon1]))
+        self.loss_G_adv2 = torch.mean(torch.stack([self.criterion(score, torch.ones_like(score)) for score in score_recon2]))
+        self.loss_G_adv = (self.loss_G_adv1 + self.loss_G_adv2) / 2
 
         self.loss_G = self.config['recon_w']*self.loss_recon + self.config['fm_w']*self.loss_fm + \
-                      self.config['adv_w']*self.loss_G_adv + self.config['vgg_w']*self.loss_vgg + \
-                      self.config['grad_w']*self.loss_grad
+                      self.config['adv_w']*self.loss_G_adv + self.config['vgg_w']*self.loss_vgg
 
         self.loss_G.backward()
         self.encoder_opt.step()
@@ -122,32 +128,37 @@ class Model(nn.Module):
         update_average(self.encoder_test, self.encoder)
         update_average(self.decoder_test, self.decoder)
 
-        return self.loss_recon.item(), self.loss_fm.item(), self.loss_G_adv.item(), self.loss_vgg, self.loss_grad, \
-               self.loss_G.item(), mask_size
+        return self.loss_recon1.item(), self.loss_recon2.item(), \
+               self.loss_fm1.item(), self.loss_fm2.item(),\
+               self.loss_G_adv1.item(), self.loss_G_adv2.item(),\
+               loss_vgg1, loss_vgg2,\
+               self.loss_G.item()
 
     def D_update(self, x):
         self.dis_opt.zero_grad()
 
         with torch.no_grad():
             z_quantized = self.encoder(x)
-            if self.is_mask:
-                mask_size = self.C_level[randint(0, len(self.C_level)-1)]
-                mask = torch.zeros_like(z_quantized, requires_grad=False).cuda()
-                mask[:, :mask_size] = 1.
-                z_quantized = z_quantized * mask
-            x_recon = self.decoder(z_quantized)
-        score_recon, feat_recon = self.D_out_decompose(self.dis(x_recon))
+            size = self.config['C']
+            z1 = z_quantized[:, :size // 2]
+            z2 = z_quantized[:, size // 2:]
+            x_recon1 = self.decoder(z1)
+            x_recon2 = self.decoder(z2)
+        score_recon1, feat_recon1 = self.D_out_decompose(self.dis(x_recon1))
+        score_recon2, feat_recon2 = self.D_out_decompose(self.dis(x_recon2 + x_recon1))
         score_x, feat_x = self.D_out_decompose(self.dis(x))
 
         # adversarial loss
         self.loss_D_real = torch.mean(torch.stack([self.criterion(score, torch.ones_like(score)) for score in score_x]))
-        self.loss_D_fake = torch.mean(torch.stack([self.criterion(score, torch.zeros_like(score)) for score in score_recon]))
+        self.loss_D_fake1 = torch.mean(torch.stack([self.criterion(score, torch.zeros_like(score)) for score in score_recon1]))
+        self.loss_D_fake2 = torch.mean(torch.stack([self.criterion(score, torch.zeros_like(score)) for score in score_recon2]))
+        self.loss_D_fake = (self.loss_D_fake1 + self.loss_D_fake2) / 2
         self.loss_D = self.config['adv_w']*torch.mean(self.loss_D_real + self.loss_D_fake)
 
         self.loss_D.backward()
         self.dis_opt.step()
 
-        return self.loss_D_real.item(), self.loss_D_fake.item(), self.loss_D.item()
+        return self.loss_D_real.item(), self.loss_D_fake1.item(), self.loss_D_fake2.item(), self.loss_D.item()
 
     def forward(self, x, mode):
         print('Forward function not implemented.')
@@ -156,37 +167,31 @@ class Model(nn.Module):
     def test(self, x):
         self.eval()
         with torch.no_grad():
-            if self.is_mask:
-                x = x[0].unsqueeze(0).repeat((len(self.C_level), 1, 1, 1))
-                z_quantized = self.encoder(x)
-                z_quantized_ema = self.encoder_test(x)
-                masks = []
-                for mask_size in self.C_level:
-                    mask = torch.zeros(z_quantized.shape[1:], requires_grad=False)
-                    mask[:mask_size] = 1.
-                    masks.append(mask)
-                masks = torch.stack(masks).cuda()
-                z_quantized = z_quantized * masks
-                z_quantized_ema = z_quantized_ema * masks
+            size = self.config['C']
+            x = x[0].unsqueeze(0)
 
-                # print size
-                z_np = z_quantized.cpu().numpy().astype(np.int8)
-                z_ema_np = z_quantized_ema.cpu().numpy().astype(np.int8)
-                for i, level in enumerate(self.C_level):
-                    z_comp = self.compressor.compress(z_np[i][:level])
-                    z_comp2 = self.compressor.compress(z_np[i])
-                    z_ema_comp = self.compressor.compress(z_ema_np[i][:level])
-                    z_ema_comp2 = self.compressor.compress(z_ema_np[i])
-                    print(f'C_level {level:>3}: {len(z_comp)}({len(z_comp2)}) bytes, '
-                          f'{len(z_ema_comp)}({len(z_ema_comp2)}) bytes')
-            else:
-                z_quantized = self.encoder(x)
-                z_quantized_ema = self.encoder_test(x)
-            x_recon = self.decoder(z_quantized)
-            x_recon_ema = self.decoder_test(z_quantized_ema)
+            z_quantized = self.encoder(x)
+            z1 = z_quantized[:, :size // 2]
+            z2 = z_quantized[:, size // 2:]
+            x_recon1 = self.decoder(z1)
+            x_recon2 = self.decoder(z2)
+
+            z_quantized_ema = self.encoder_test(x)
+            z1 = z_quantized_ema[:, :size // 2]
+            z2 = z_quantized_ema[:, size // 2:]
+            x_recon1_ema = self.decoder_test(z1)
+            x_recon2_ema = self.decoder_test(z2)
+
+            z_np = z_quantized.cpu().numpy().astype(np.int8)
+            z1_np = z1.cpu().numpy().astype(np.int8)
+            z_comp = self.compressor.compress(z_np)
+            z_comp2 = self.compressor.compress(z1_np)
+
+            print(f'{len(z_comp)}({len(z_comp2)}) bytes')
+
         self.train()
 
-        return x, x_recon, x_recon_ema
+        return x, x_recon1, x_recon2, x_recon1_ema, x_recon2_ema
 
     def save(self, snapshot_dir, filename):
         snapshot = {
@@ -308,6 +313,8 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         image_shape = config['image_shape']
         C = config['C']
+        if config['res'] == 1:
+            C //= 2
         df = config['downscale_factor']
         up_channel = config['dec_up_channel']
         res_num = config['dec_res_num']

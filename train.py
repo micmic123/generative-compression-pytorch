@@ -93,7 +93,7 @@ while True:
                 test_loader = iter(test_dataloader)
                 x_test, size = next(test_loader)
             x_test = x_test.cuda()
-            x_test, x_test_recon, x_test_recon_ema = model.test(x_test)
+            x, x_recon1, x_recon2, x_recon1_ema, x_recon2_ema = model.test(x_test)
             out = torch.cat([x_test.detach(), x_test_recon.detach(), x_test_recon_ema.detach()], dim=0)
             save_grid(out, f'{output_dir}/{model.itr:08}_test.png', nrow=4)
 

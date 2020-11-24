@@ -22,14 +22,18 @@ grad_w: 0
 downscale_factor: 4
 
 # Encoder
-C: 8
+C: 16
 L: 5
 Q_std: 1
 enc_up_channel: 60
 
 # masked-Z
-mask: 1                        # 0 or 1
+mask: 0                        # 0 or 1
 C_level: [4, 8, 32, 128]       # C = C_level[-1]
+
+# residual-Z
+res: 1
+margin: 0.002
 
 # Decoder
 dec_up_channel: 960

@@ -12,6 +12,7 @@ weight_decay: 0.0001        # weight decay
 lr_encoder: 0.0001
 lr_decoder: 0.0001           # learning rate for the generator
 lr_dis: 0.0001               # learning rate for the discriminator
+lr_controller: 0.0001
 lr_shedule_step: 400000
 adv_w: 1                      # weight of adversarial loss for image translation
 fm_w: 10                       # weight on distance between gan features of style and translated image
@@ -28,8 +29,9 @@ Q_std: 1
 enc_up_channel: 60
 
 # masked-Z
-mask: 1                        # 0 or 1
+mask: 0                        # 0 or 1
 C_level: [4, 8, 32, 128]       # C = C_level[-1]
+controller: 1                  # 0 or 1
 
 # Decoder
 dec_up_channel: 960

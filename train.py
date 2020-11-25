@@ -30,8 +30,6 @@ train_writer = SummaryWriter(base_dir)
 train_dataloader, image_num, test_dataloader = get_dataloader(config)
 test_loader = iter(test_dataloader)
 config['image_num'] = image_num
-if config['mask'] == 1:
-    config['C'] = config['C_level'][-1]
 
 print('[device]', args.device)
 print('[config]', args.config)
@@ -72,6 +70,8 @@ while True:
             lr_schedule(model.encoder_opt, config['lr_encoder'])
             lr_schedule(model.decoder_opt, config['lr_decoder'])
             lr_schedule(model.dis_opt, config['lr_dis'])
+            if model.has_controller:
+                lr_schedule(model.controller_opt, config['lr_dis'])
 
         if model.itr % config['log_itr'] == 0:
             write_loss(model.itr, model, train_writer)

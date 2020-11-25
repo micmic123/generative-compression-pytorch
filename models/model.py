@@ -12,6 +12,7 @@ import torch.nn.init as init
 from .blocks import ResBlock, ResBlocks, Conv2dBlock, UpConv2dBlock, LinearBlock
 from .quantizer import Quantizer
 from .discriminator import Discriminator
+from .controller import Controller
 from .vgg import VGG16
 from .loss import Scharr
 
@@ -31,6 +32,7 @@ class Model(nn.Module):
         super(Model, self).__init__()
         self.config = config
         self.encoder = Encoder(config)
+        self.quantizer = self.encoder.q
         self.decoder = Decoder(config)
         self.dis = Discriminator(config)
         self.vgg = VGG16()
@@ -39,12 +41,18 @@ class Model(nn.Module):
         self.criterion = nn.MSELoss()
         self.criterion_L1 = nn.L1Loss()
 
-        self.is_mask = True if config['mask'] == 1 else False
-        self.C_level = config['C_level'] if self.is_mask else None
+        self.is_mask = config['mask'] == 1
+        self.C_level = config['C_level']
+        self.has_controller = config['controller'] == 1
+        assert not (self.is_mask and self.has_controller)
+        if self.has_controller:
+            self.controller = Controller(config, self.quantizer)
 
         encoder_params = list(self.encoder.parameters())
         decoder_params = list(self.decoder.parameters())
         dis_params = list(self.dis.parameters())
+        if self.has_controller:
+            controller_params = list(self.controller.parameters())
         self.encoder_opt = torch.optim.Adam(
             [p for p in encoder_params if p.requires_grad],
             lr=config['lr_encoder'], weight_decay=config['weight_decay'])
@@ -54,9 +62,15 @@ class Model(nn.Module):
         self.dis_opt = torch.optim.Adam(
             [p for p in dis_params if p.requires_grad],
             lr=config['lr_dis'], weight_decay=config['weight_decay'])
+        if self.has_controller:
+            self.controller_opt = torch.optim.Adam(
+                [p for p in controller_params if p.requires_grad],
+                lr=config['lr_controller'], weight_decay=config['weight_decay'])
 
         self.encoder_test = copy.deepcopy(self.encoder)
         self.decoder_test = copy.deepcopy(self.decoder)
+        if self.has_controller:
+            self.controller_test = copy.deepcopy(self.decoder)
         self.apply(weights_init(config['init']))
         self.compressor = gzip
         self.itr = 0
@@ -78,19 +92,28 @@ class Model(nn.Module):
     def G_update(self, x):
         self.encoder_opt.zero_grad()
         self.decoder_opt.zero_grad()
+        if self.has_controller:
+            self.controller_opt.zero_grad()
 
-        z_quantized = self.encoder(x)
+        z = self.encoder.get_z(x)
+        z_quantized, _, _ = self.quantizer(z)
         mask_size = self.config['C']
         if self.is_mask:
             mask_size = self.C_level[randint(0, len(self.C_level)-1)]
             mask = torch.zeros_like(z_quantized, requires_grad=False).cuda()
             mask[:, :mask_size] = 1.
             z_quantized = z_quantized * mask
+        elif self.has_controller:
+            zs = self.controller.down(z)  # [(B, 8, 8, 16), (B, 32, 16, 16)]
+            zs_quantized = [self.quantizer(z_)[0] for z_ in zs]
+            z_q_all = self.controller.up(zs_quantized)  # [(B, 128, 16, 16) * (len(C_level)-1)]
+            z_q_all.append(z_quantized)  # [(B, 128, 16, 16) * len(C_level)]
+            z_quantized = torch.cat(z_q_all, dim=0)  # (B*(len(C_Level)), 128, 16, 16)
+            x = x.repeat((len(self.C_level), 1, 1, 1))
 
         x_recon = self.decoder(z_quantized)
         score_recon, feat_recon = self.D_out_decompose(self.dis(x_recon))
         score_x, feat_x = self.D_out_decompose(self.dis(x))
-
         # recon loss
         self.loss_recon = self.criterion(x_recon, x)
 
@@ -119,8 +142,12 @@ class Model(nn.Module):
         self.loss_G.backward()
         self.encoder_opt.step()
         self.decoder_opt.step()
+        if self.has_controller:
+            self.controller_opt.step()
         update_average(self.encoder_test, self.encoder)
         update_average(self.decoder_test, self.decoder)
+        if self.has_controller:
+            update_average(self.controller_test, self.controller)
 
         return self.loss_recon.item(), self.loss_fm.item(), self.loss_G_adv.item(), self.loss_vgg, self.loss_grad, \
                self.loss_G.item(), mask_size
@@ -129,12 +156,20 @@ class Model(nn.Module):
         self.dis_opt.zero_grad()
 
         with torch.no_grad():
-            z_quantized = self.encoder(x)
+            z = self.encoder.get_z(x)
+            z_quantized, _, _ = self.quantizer(z)
+            mask_size = self.config['C']
             if self.is_mask:
                 mask_size = self.C_level[randint(0, len(self.C_level)-1)]
                 mask = torch.zeros_like(z_quantized, requires_grad=False).cuda()
                 mask[:, :mask_size] = 1.
                 z_quantized = z_quantized * mask
+            elif self.has_controller:
+                zs = self.controller.down(z)
+                zs_quantized = [self.quantizer(z_)[0] for z_ in zs]
+                z_q_all = self.controller.up(zs_quantized)
+                z_q_all.append(z_quantized)
+                z_quantized = torch.cat(z_q_all, dim=0)
             x_recon = self.decoder(z_quantized)
         score_recon, feat_recon = self.D_out_decompose(self.dis(x_recon))
         score_x, feat_x = self.D_out_decompose(self.dis(x))
@@ -157,17 +192,26 @@ class Model(nn.Module):
         self.eval()
         with torch.no_grad():
             if self.is_mask:
-                x = x[0].unsqueeze(0).repeat((len(self.C_level), 1, 1, 1))
-                z_quantized = self.encoder(x)
-                z_quantized_ema = self.encoder_test(x)
-                masks = []
-                for mask_size in self.C_level:
-                    mask = torch.zeros(z_quantized.shape[1:], requires_grad=False)
-                    mask[:mask_size] = 1.
-                    masks.append(mask)
-                masks = torch.stack(masks).cuda()
-                z_quantized = z_quantized * masks
-                z_quantized_ema = z_quantized_ema * masks
+                x = x[0].unsqueeze(0).expand((len(self.C_level), 1, 1, 1))
+                if not self.has_controller:
+                    z_quantized = self.encoder(x)
+                    z_quantized_ema = self.encoder_test(x)
+                    masks = []
+                    for mask_size in self.C_level:
+                        mask = torch.zeros(z_quantized.shape[1:], requires_grad=False)
+                        mask[:mask_size] = 1.
+                        masks.append(mask)
+                    masks = torch.stack(masks).cuda()
+                    z_quantized = z_quantized * masks
+                    z_quantized_ema = z_quantized_ema * masks
+                else:
+                    z = self.encoder.get_z(x)
+                    zs = self.controller.down(z)  # [(B, 8, 8, 16), (B, 32, 16, 16)]
+                    z_quantized, _, _ = self.quantizer(z)
+                    zs_quantized = [self.quantizer(z_)[0] for z_ in zs]
+                    z_q_all = self.controller.up(zs_quantized)  # [(B, 128, 16, 16) * (len(C_level)-1)]
+                    z_q_all.append(z_quantized)  # [(B, 128, 16, 16) * len(C_level)]
+                    z_quantized = torch.cat(z_q_all, dim=0)  # (B*(len(C_Level)), 128, 16, 16)
 
                 # print size
                 z_np = z_quantized.cpu().numpy().astype(np.int8)
@@ -196,6 +240,8 @@ class Model(nn.Module):
             'encoder_test': self.encoder_test.state_dict(),
             'decoder': self.decoder.state_dict(),
             'decoder_test': self.decoder_test.state_dict(),
+            'controller': self.controller.state_dict(),
+            'controller_test': self.controller_test.state_dict(),
             'dis': self.dis.state_dict(),
             'encoder_opt': self.encoder_opt.state_dict(),
             'decoder_opt': self.decoder_opt.state_dict(),
@@ -215,6 +261,10 @@ class Model(nn.Module):
         self.encoder_opt.load_state_dict(snapshot['encoder_opt'])
         self.decoder_opt.load_state_dict(snapshot['decoder_opt'])
         self.dis_opt.load_state_dict(snapshot['dis_opt'])
+        if 'controller' in snapshot:
+            self.encoder.load_state_dict(snapshot['controller'])
+            self.encoder_test.load_state_dict(snapshot['controller_test'])
+            self.dis_opt.load_state_dict(snapshot['controller_opt'])
 
         print(f'Loaded from itr: {self.itr}.')
 
@@ -280,7 +330,7 @@ class Encoder(nn.Module):
         for i in range(df):
             self.model.append(Conv2dBlock(up_channel, 2*up_channel, 4, 2, 1, norm='in', pad_type='reflect'))
             up_channel *= 2
-        self.model.append(Conv2dBlock(up_channel, self.C, 3, 1, 1, norm='in', pad_type='reflect'))
+        self.model.append(Conv2dBlock(up_channel, self.C, 3, 1, 1, norm='in', pad_type='reflect', activation='none'))
         self.model = nn.Sequential(*self.model)
 
         self.levels = nn.Parameter(torch.linspace(-(self.L // 2), (self.L // 2), self.L), requires_grad=False)

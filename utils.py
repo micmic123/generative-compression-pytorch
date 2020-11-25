@@ -20,6 +20,8 @@ def init(args):
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(snapshot_dir, exist_ok=True)
     config = get_config(args.config)
+    if config['mask'] == 1 or config['controller'] == 1:
+        config['C'] = config['C_level'][-1]
     copy2(args.config, os.path.join(base_dir, 'config.yaml'))
 
     return base_dir, snapshot_dir, output_dir, log_path, config

@@ -330,7 +330,7 @@ class Encoder(nn.Module):
         for i in range(df):
             self.model.append(Conv2dBlock(up_channel, 2*up_channel, 4, 2, 1, norm='in', pad_type='reflect'))
             up_channel *= 2
-        self.model.append(Conv2dBlock(up_channel, self.C, 3, 1, 1, norm='in', pad_type='reflect', activation='none'))
+        self.model.append(Conv2dBlock(up_channel, self.C, 3, 1, 1, norm='none', pad_type='reflect', activation='none'))
         self.model = nn.Sequential(*self.model)
 
         self.levels = nn.Parameter(torch.linspace(-(self.L // 2), (self.L // 2), self.L), requires_grad=False)
@@ -362,6 +362,7 @@ class Decoder(nn.Module):
         up_channel = config['dec_up_channel']
         res_num = config['dec_res_num']
         self.decoder = [
+            nn.InstanceNorm2d(C),
             Conv2dBlock(C, up_channel, 3, 1, 1, norm='in', pad_type='reflect'),
             ResBlocks(res_num, up_channel, norm='in', activation='relu', pad_type='reflect')
         ]

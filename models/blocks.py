@@ -40,11 +40,11 @@ class ResBlock(nn.Module):
 
 
 class UpConv2dBlock(nn.Module):
-    def __init__(self, dim, activ='relu', pad_type='reflect'):
+    def __init__(self, dim, norm='in', activ='relu', pad_type='reflect'):
         super(UpConv2dBlock, self).__init__()
         model = [nn.Upsample(scale_factor=2),
                  Conv2dBlock(dim, dim // 2, 5, 1, 2,
-                             norm='in',
+                             norm=norm,
                              activation=activ,
                              pad_type=pad_type)]
         self.model = nn.Sequential(*model)

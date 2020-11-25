@@ -8,10 +8,17 @@ class Controller(nn.Module):
         self.config = config
         self.C_level = sorted(config['C_level'])[::-1]  # descending order
         for i in range(len(self.C_level) - 1):
-            down = Conv2dBlock(self.C_level[i], self.C_level[i + 1], 3, 1, 1, norm='in', pad_type='reflect', activation='none')
-            up = Conv2dBlock(self.C_level[i + 1], self.C_level[i], 3, 1, 1, norm='in', pad_type='reflect', activation='none')
-            setattr(self, f'down_{i}', down)
-            setattr(self, f'up_{i}', up)
+            down = [
+                nn.InstanceNorm2d(self.C_level[i]),
+                Conv2dBlock(self.C_level[i], self.C_level[i+1], 3, 1, 1, norm='none', pad_type='reflect', activation='none')
+            ]
+            up = [
+                nn.InstanceNorm2d(self.C_level[i+1]),
+                Conv2dBlock(self.C_level[i+1], self.C_level[i], 3, 1, 1, norm='none', pad_type='reflect', activation='none')
+            ]
+
+            setattr(self, f'down_{i}', nn.Sequential(*down))
+            setattr(self, f'up_{i}', nn.Sequential(*up))
         self.q = q
 
     def down(self, z):

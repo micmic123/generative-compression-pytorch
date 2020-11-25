@@ -61,4 +61,6 @@ class Quantizer(nn.Module):
         x_hard = self.levels[symbols_hard]
 
         x_soft.data = x_hard  # assign data, keep gradient
-        return x_soft, x_hard, symbols_hard
+
+        # , x_hard, symbols_hard
+        return x_soft

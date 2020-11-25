@@ -47,7 +47,7 @@ class Controller(nn.Module):
             for j in range(i, -1, -1):
                 up = getattr(self, f'up_{j}')
                 x = up(x)
-                x = self.q(x)[0]
+                x = self.q(x)
             out.append(x)
 
         return out[::-1]  # ascending order for bpp

@@ -62,7 +62,7 @@ while True:
             loss_D_real, loss_D_fake, loss_D = model.D_update(x)
             update_D *= -1
             continue
-        loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_grad, loss_G, mask_size = model.G_update(x)
+        loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_grad, loss_sparse, loss_G, mask_size = model.G_update(x)
         update_D *= -1
 
         elapsed_t = time() - t0
@@ -78,8 +78,9 @@ while True:
 
         if model.itr % config['log_print_itr'] == 0:
             print(f'[{model.itr:>6}] recon={loss_recon:>.4f} | fm={loss_fm:>.4f} | G_adv={loss_G_adv:>.4f} | '
-                  f'vgg={loss_vgg:>.4f} | grad={loss_grad:>.4f} | G={loss_G:>.4f} | D_real={loss_D_real:>.4f} | '
-                  f'D_fake={loss_D_fake:>.4f} | D={loss_D:>.4f} {mask_size:>3} ({elapsed_t:>.2f}s)')
+                  f'vgg={loss_vgg:>.4f} | grad={loss_grad:>.4f} | sparse={loss_sparse:>.4f} | G={loss_G:>.4f} | '
+                  f'D_real={loss_D_real:>.4f} | D_fake={loss_D_fake:>.4f} | D={loss_D:>.4f} {mask_size:>3} '
+                  f'({elapsed_t:>.2f}s)')
 
         if model.itr % config['image_save_itr'] == 0:
             x_train = x[:config['batchsize_test']]

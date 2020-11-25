@@ -30,6 +30,8 @@ enc_up_channel: 60
 # masked-Z
 mask: 1                        # 0 or 1
 C_level: [4, 8, 32, 128]       # C = C_level[-1]
+sparse: 1
+sprase_w: 0.0001
 
 # Decoder
 dec_up_channel: 960

@@ -41,6 +41,7 @@ class Model(nn.Module):
 
         self.is_mask = True if config['mask'] == 1 else False
         self.C_level = config['C_level'] if self.is_mask else None
+        self.is_sparse = True if self.is_mask and config['sparse'] == 1 else False
 
         encoder_params = list(self.encoder.parameters())
         decoder_params = list(self.decoder.parameters())
@@ -79,13 +80,20 @@ class Model(nn.Module):
         self.encoder_opt.zero_grad()
         self.decoder_opt.zero_grad()
 
-        z_quantized = self.encoder(x)
+        # z_quantized = self.encoder(x)
+        z = self.encoder.get_z(x)
+        z_quantized, _, _ = self.encoder.q(z)
         mask_size = self.config['C']
+        self.loss_sparse = 0
         if self.is_mask:
             mask_size = self.C_level[randint(0, len(self.C_level)-1)]
             mask = torch.zeros_like(z_quantized, requires_grad=False).cuda()
             mask[:, :mask_size] = 1.
             z_quantized = z_quantized * mask
+
+            if self.is_sparse:
+                z_blocked = z * (1 - mask)
+                self.loss_sparse = z_blocked.abs().sum()
 
         x_recon = self.decoder(z_quantized)
         score_recon, feat_recon = self.D_out_decompose(self.dis(x_recon))
@@ -114,7 +122,7 @@ class Model(nn.Module):
 
         self.loss_G = self.config['recon_w']*self.loss_recon + self.config['fm_w']*self.loss_fm + \
                       self.config['adv_w']*self.loss_G_adv + self.config['vgg_w']*self.loss_vgg + \
-                      self.config['grad_w']*self.loss_grad
+                      self.config['grad_w']*self.loss_grad + self.config['sprase_w']*self.loss_sparse
 
         self.loss_G.backward()
         self.encoder_opt.step()
@@ -123,7 +131,7 @@ class Model(nn.Module):
         update_average(self.decoder_test, self.decoder)
 
         return self.loss_recon.item(), self.loss_fm.item(), self.loss_G_adv.item(), self.loss_vgg, self.loss_grad, \
-               self.loss_G.item(), mask_size
+               self.loss_sparse.item(), self.loss_G.item(), mask_size
 
     def D_update(self, x):
         self.dis_opt.zero_grad()

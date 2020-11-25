@@ -81,11 +81,11 @@ class Model(nn.Module):
 
         z_quantized = self.encoder(x)
         mask_size = self.config['C']
-        if self.is_mask:
-            mask_size = self.C_level[randint(0, len(self.C_level)-1)]
-            mask = torch.zeros_like(z_quantized, requires_grad=False).cuda()
-            mask[:, :mask_size] = 1.
-            z_quantized = z_quantized * mask
+        level = randint(0, len(self.C_level)-1)
+        mask_size = self.C_level[level]
+        mask = torch.zeros_like(z_quantized, requires_grad=False).cuda()
+        mask[:, :mask_size] = 1.
+        z_quantized = z_quantized * mask
 
         x_recon = self.decoder(z_quantized)
         score_recon, feat_recon = self.D_out_decompose(self.dis(x_recon))
@@ -116,6 +116,8 @@ class Model(nn.Module):
                       self.config['adv_w']*self.loss_G_adv + self.config['vgg_w']*self.loss_vgg + \
                       self.config['grad_w']*self.loss_grad
 
+        self.loss_G = self.config['C_lr_w'][level] * self.loss_G
+
         self.loss_G.backward()
         self.encoder_opt.step()
         self.decoder_opt.step()
@@ -123,7 +125,7 @@ class Model(nn.Module):
         update_average(self.decoder_test, self.decoder)
 
         return self.loss_recon.item(), self.loss_fm.item(), self.loss_G_adv.item(), self.loss_vgg, self.loss_grad, \
-               self.loss_G.item(), mask_size
+               (self.loss_G / self.config['C_lr_w'][level]).item(), mask_size
 
     def D_update(self, x):
         self.dis_opt.zero_grad()

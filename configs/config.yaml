@@ -28,8 +28,9 @@ Q_std: 1
 enc_up_channel: 60
 
 # masked-Z
-mask: 1                        # 0 or 1
-C_level: [4, 8, 32, 128]       # C = C_level[-1]
+mask: 1                           # 0 or 1
+C_level: [4, 8, 32, 128]          # C = C_level[-1]
+C_lr_w: [1, 0.5, 0.25, 0.125]     # C = C_level[-1]
 
 # Decoder
 dec_up_channel: 960

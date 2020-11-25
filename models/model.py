@@ -290,7 +290,7 @@ class Encoder(nn.Module):
         for i in range(df):
             self.model.append(Conv2dBlock(up_channel, 2*up_channel, 4, 2, 1, norm='in', pad_type='reflect'))
             up_channel *= 2
-        self.model.append(Conv2dBlock(up_channel, self.C, 3, 1, 1, norm='in', pad_type='reflect'))
+        self.model.append(Conv2dBlock(up_channel, self.C, 3, 1, 1, norm='in', pad_type='reflect', activation='none'))
         self.model = nn.Sequential(*self.model)
 
         self.levels = nn.Parameter(torch.linspace(-(self.L // 2), (self.L // 2), self.L), requires_grad=False)

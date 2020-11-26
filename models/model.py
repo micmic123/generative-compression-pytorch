@@ -138,14 +138,9 @@ class Model(nn.Module):
         score_x, feat_x = self.D_out_decompose(self.dis(x))
 
         # adversarial loss
-        loss_D_real, loss_D_fake, = 0, 0
-        for score in score_x:
-            loss_D_real += self.criterion(score, torch.ones_like(score).cuda())
-        for score in score_recon:
-            loss_D_fake += self.criterion(score, torch.ones_like(score).cuda())
-        loss_D_real /= x.shape[0]
-        loss_D_fake /= x.shape[0]
-        loss_D = self.config['adv_w']*(loss_D_real + loss_D_fake) / 2
+        loss_D_real = torch.mean(torch.stack([self.criterion(score, torch.ones_like(score)) for score in score_x]))
+        loss_D_fake = torch.mean(torch.stack([self.criterion(score, torch.zeros_like(score)) for score in score_recon]))
+        loss_D = self.config['adv_w']*torch.mean(loss_D_real + loss_D_fake)
 
         loss_D.backward()
 

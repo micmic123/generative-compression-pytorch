@@ -40,7 +40,10 @@ print('[config]', args.config)
 msg = f'======================= {args.name} ======================='
 print(msg)
 for k, v in config.items():
-    print(f'  {k}: ', v)
+    if k in ['C', 'mask', 'C_level', 'controller']:
+        print(f' *{k}: ', v)
+    else:
+        print(f'  {k}: ', v)
 print('='*len(msg))
 print()
 
@@ -86,7 +89,7 @@ while True:
         if trainer.itr % config['log_print_itr'] == 0:
             print(f'[{trainer.itr:>6}] recon={loss_recon:>.4f} | fm={loss_fm:>.4f} | G_adv={loss_G_adv:>.4f} | '
                   f'vgg={loss_vgg:>.4f} | grad={loss_grad:>.4f} | G={loss_G:>.4f} | D_real={loss_D_real:>.4f} | '
-                  f'D_fake={loss_D_fake:>.4f} | D={loss_D:>.4f} {1:>3} ({elapsed_t:>.2f}s)')  # mask_size
+                  f'D_fake={loss_D_fake:>.4f} | D={loss_D:>.4f} ({elapsed_t:>.2f}s)')  # {mask_size:>3}
 
         if trainer.itr % config['image_save_itr'] == 0:
             x_train = x[:config['batchsize_test']]

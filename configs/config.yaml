@@ -1,21 +1,21 @@
 # logger options
-image_save_itr: 100          # How often do you want to save output images during training
-snapshot_save_itr: 30000     # How often do you want to save trained models
-snapshot_latest_save_itr: 5000     # How often do you want to save trained models
-log_itr: 1                   # How often do you want to log the training stats
+image_save_itr: 100             # How often do you want to save output images during training
+snapshot_save_itr: 30000        # How often do you want to save trained models
+snapshot_latest_save_itr: 3000  # How often do you want to save the latest trained models
+log_itr: 1                      # How often do you want to log the training stats
 log_print_itr: 1
 
 # optimization options
 init: kaiming
 max_iter: 1000000             # maximum number of training iterations
-weight_decay: 0.0001        # weight decay
+weight_decay: 0.000001        # weight decay
 lr_encoder: 0.0001
 lr_decoder: 0.0001           # learning rate for the generator
 lr_dis: 0.0001               # learning rate for the discriminator
 lr_controller: 0.0001
 lr_shedule_step: 400000
 adv_w: 1                      # weight of adversarial loss for image translation
-fm_w: 10                       # weight on distance between gan features of style and translated image
+fm_w: 10                      # weight on distance between gan features of style and translated image
 recon_w: 10                   # weight of image reconstruction loss
 vgg_w: 10
 grad_w: 0
@@ -23,24 +23,24 @@ grad_w: 0
 downscale_factor: 4
 
 # Encoder
-C: 8
+C: 64
 L: 5
 Q_std: 1
-enc_up_channel: 60
+enc_up_channel: 58
 
 # masked-Z
 mask: 0                        # 0 or 1
-C_level: [4, 8, 32, 128]       # C = C_level[-1]
+C_level: [8, 16, 32, 64]    # C = C_level[-1]
 controller: 1                  # 0 or 1
 
 # Decoder
-dec_up_channel: 960
-dec_res_num: 9
+dec_up_channel: 928
+dec_res_num: 5
 
 # data options
 trainset: ./data/trainset.csv
 testset: ./data/testset.csv
-batchsize: 10
+batchsize: 11
 batchsize_test: 4
 image_num: 0
 image_shape: [3, 256, 256]

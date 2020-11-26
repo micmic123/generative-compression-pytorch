@@ -7,7 +7,7 @@ class Controller(nn.Module):
         super(Controller, self).__init__()
         self.config = config
         self.C_level = sorted(config['C_level'])[::-1]  # descending order
-        for i in range(len(self.C_level) - 1):
+        for i in range(len(self.C_level)-1):
             down = [
                 nn.InstanceNorm2d(self.C_level[i]),
                 Conv2dBlock(self.C_level[i], self.C_level[i+1], 3, 1, 1, norm='none', pad_type='reflect', activation='none')

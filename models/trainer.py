@@ -140,14 +140,15 @@ class Trainer(nn.Module):
             'encoder_test': model.encoder_test.state_dict(),
             'decoder': model.decoder.state_dict(),
             'decoder_test': model.decoder_test.state_dict(),
-            'controller': model.controller.state_dict(),
-            'controller_test': model.controller_test.state_dict(),
             'dis': model.dis.state_dict(),
             'encoder_opt': self.encoder_opt.state_dict(),
             'decoder_opt': self.decoder_opt.state_dict(),
-            'dis_opt': self.dis_opt.state_dict(),
-            'controller_opt': self.controller_opt.state_dict()
+            'dis_opt': self.dis_opt.state_dict()
         }
+        if self.has_controller:
+            snapshot['controller'] = model.controller.state_dict()
+            snapshot['controller_test'] = model.controller_test.state_dict()
+            snapshot['controller_opt'] = self.controller_opt.state_dict()
 
         torch.save(snapshot, os.path.join(snapshot_dir, filename))
 

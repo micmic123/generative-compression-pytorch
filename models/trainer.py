@@ -60,6 +60,7 @@ class Trainer(nn.Module):
         self.C_level = config['C_level']
         self.has_controller = config['controller'] == 1
         assert not (self.is_mask and self.has_controller)
+        assert self.is_mask
 
         encoder_params = list(self.model.encoder.parameters())
         decoder_params = list(self.model.decoder.parameters())

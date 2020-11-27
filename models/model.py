@@ -95,7 +95,7 @@ class Model(nn.Module):
         x_vgg, x_recon_vgg = self.vgg(x), self.vgg(x_recon)
         loss_vgg = 0
         for i, (f1, f2) in enumerate(zip(x_vgg, x_recon_vgg)):
-            loss_vgg += self.vgg_weights[i] * self.criterion_L1(f1.detach(), f2)
+            loss_vgg += self.vgg_weights[i] * self.criterion(f1.detach(), f2)
         loss_vgg = loss_vgg
 
         # image gradient loss
@@ -152,7 +152,7 @@ class Model(nn.Module):
         elif mode == 'D_update':
             return self.D_update(x)
 
-    def test(self, x):
+    def test(self, x, filename='test'):
         x = x.cuda()
         self.eval()
         with torch.no_grad():
@@ -202,7 +202,7 @@ class Model(nn.Module):
                     z_quantized_ema = torch.cat(z_q_all_ema, dim=0)
 
                     # print size
-                    print('[ test ]')
+                    print(f'[{filename}]')
                     x_size = x.shape[-1] * x.shape[-2]
                     z_all = zs_quantized + [z_q]
                     z_np = [z_.cpu().numpy().astype(np.int8) for z_ in z_all]

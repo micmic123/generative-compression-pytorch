@@ -15,7 +15,7 @@ lr_dis: 0.0001               # learning rate for the discriminator
 lr_controller: 0.0001
 lr_shedule_step: 400000
 adv_w: 1                      # weight of adversarial loss for image translation
-fm_w: 10                      # weight on distance between gan features of style and translated image
+fm_w: 5                       # weight on distance between gan features of style and translated image
 recon_w: 10                   # weight of image reconstruction loss
 vgg_w: 10
 grad_w: 0
@@ -31,7 +31,9 @@ enc_up_channel: 58
 # masked-Z
 mask: 0                        # 0 or 1
 C_level: [8, 16, 32, 64]    # C = C_level[-1]
+C_lr_w: [1, 0.8, 0.7, 0.6]
 controller: 1                  # 0 or 1
+
 
 # Decoder
 dec_up_channel: 928

@@ -3,8 +3,7 @@ import argparse
 from time import time
 from datetime import datetime
 import torch
-from tensorboardX import SummaryWriter
-from utils import init, save_grid, lr_schedule, write_loss
+from utils import init, save_grid, lr_schedule, write_loss, get_eval_list, eval_model
 from dataset import get_dataloader
 from models.trainer import Trainer
 
@@ -25,11 +24,14 @@ if not args.config:
     else:
         args.config = './configs/config.yaml'
 
-base_dir, snapshot_dir, output_dir, log_path, config = init(args)
-train_writer = SummaryWriter(base_dir)
+base_dir, snapshot_dir, output_dir, summary_writers, config = init(args)
 train_dataloader, image_num, test_dataloader = get_dataloader(config)
 test_loader = iter(test_dataloader)
+eval_imgs = get_eval_list()
 config['image_num'] = image_num
+nrow = config['batchsize_test']
+if config['controller']:
+    nrow = len(config['C_level'])
 
 if args.multigpus:
     args.device = args.multigpus # ','.join([str(n) for n in args.multigpus])
@@ -40,7 +42,7 @@ print('[config]', args.config)
 msg = f'======================= {args.name} ======================='
 print(msg)
 for k, v in config.items():
-    if k in ['C', 'mask', 'C_level', 'controller']:
+    if k in {'C', 'mask', 'C_level', 'C_w', 'controller', 'controller_v'}:
         print(f' *{k}: ', v)
     else:
         print(f'  {k}: ', v)
@@ -69,7 +71,7 @@ while True:
             loss_D_real, loss_D_fake, loss_D = trainer.D_update(x)
             update_D *= -1
             continue
-        loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_grad, loss_G = trainer.G_update(x)  # , mask_size
+        loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_grad, loss_G, loss_match = trainer.G_update(x)  # , mask_size
         update_D *= -1
 
         torch.cuda.synchronize()
@@ -84,18 +86,25 @@ while True:
                 lr_schedule(trainer.controller_opt, config['lr_dis'])
 
         if trainer.itr % config['log_itr'] == 0:
-            write_loss(trainer.itr, trainer, train_writer)
+            write_loss(trainer.itr, trainer, summary_writers)
 
         if trainer.itr % config['log_print_itr'] == 0:
-            print(f'[{trainer.itr:>6}] recon={loss_recon:>.4f} | fm={loss_fm:>.4f} | G_adv={loss_G_adv:>.4f} | '
-                  f'vgg={loss_vgg:>.4f} | grad={loss_grad:>.4f} | G={loss_G:>.4f} | D_real={loss_D_real:>.4f} | '
-                  f'D_fake={loss_D_fake:>.4f} | D={loss_D:>.4f} ({elapsed_t:>.2f}s)')  # {mask_size:>3}
+            # G={loss_G:>.4f} D={loss_D:>.4f} {mask_size:>3}
+            if loss_match:
+                print(f'[{trainer.itr:>6}] recon={loss_recon:>.4f} | fm={loss_fm:>.4f} | G_adv={loss_G_adv:>.4f} | '
+                      f'vgg={loss_vgg:>.4f} | grad={loss_grad:>.4f} | D_real={loss_D_real:>.4f} | '
+                      f'D_fake={loss_D_fake:>.4f} | match={loss_match:>.4f} ({elapsed_t:>.2f}s)')
+            else:
+                print(f'[{trainer.itr:>6}] recon={loss_recon:>.4f} | fm={loss_fm:>.4f} | G_adv={loss_G_adv:>.4f} | '
+                      f'vgg={loss_vgg:>.4f} | grad={loss_grad:>.4f} | D_real={loss_D_real:>.4f} | '
+                      f'D_fake={loss_D_fake:>.4f} | ({elapsed_t:>.2f}s)')
 
         if trainer.itr % config['image_save_itr'] == 0:
             x_train = x[:config['batchsize_test']]
             x_train, x_train_recon, x_train_recon_ema = trainer.test(x_train)
             out = torch.cat([x_train.detach(), x_train_recon.detach(), x_train_recon_ema.detach()], dim=0)
-            save_grid(out, f'{output_dir}/{trainer.itr:08}_train.png', nrow=4)
+
+            save_grid(out, f'{output_dir}/{trainer.itr:08}_train.png', nrow=nrow)
 
             try:
                 x_test, size = next(test_loader)
@@ -105,13 +114,17 @@ while True:
             x_test = x_test.cuda()
             x_test, x_test_recon, x_test_recon_ema = trainer.test(x_test)
             out = torch.cat([x_test.detach(), x_test_recon.detach(), x_test_recon_ema.detach()], dim=0)
-            save_grid(out, f'{output_dir}/{trainer.itr:08}_test.png', nrow=4)
+            save_grid(out, f'{output_dir}/{trainer.itr:08}_test.png', nrow=nrow)
 
             z, z_shape = trainer.encode(x_train[0].unsqueeze(0))
             z_test, z_ema_shape = trainer.encode(x_test[0].unsqueeze(0))
 
             if not (config['mask'] or config['controller']):
                 print(f'x_train[0]: {len(z)}bytes, x_test[0]: {len(z_test)}bytes')
+
+        if trainer.itr % config['eval_itr'] == 0:
+            eval_model(trainer, eval_imgs)
+            write_loss(trainer.itr, trainer, summary_writers, True)
 
         if trainer.itr % config['snapshot_save_itr'] == 0:
             trainer.save(snapshot_dir, f'itr_{trainer.itr:08}.pt')

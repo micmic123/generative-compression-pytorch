@@ -182,22 +182,29 @@ class Conv2dBlock(nn.Module):
         return x
 
 
-class ResBlock(nn.Module):
-    def __init__(self, dim, norm='in', activation='relu', pad_type='zero'):
-        super(ResBlock, self).__init__()
+class ChannelResBlock(nn.Module):
+    def __init__(self, in_dim, out_dim, norm='in', activation='relu', pad_type='reflect'):
+        super(ChannelResBlock, self).__init__()
+        k = out_dim - in_dim
         model = []
-        model += [Conv2dBlock(dim, dim, 3, 1, 1,
+        model += [Conv2dBlock(in_dim, 4*k, 3, 1, 1,
                               norm=norm,
                               activation=activation,
                               pad_type=pad_type)]
-        model += [Conv2dBlock(dim, dim, 3, 1, 1,
-                              norm=norm,
-                              activation='none',
+        model += [ResBlocks(4, 4*k,
+                            norm=norm,
+                            activation=activation,
+                            pad_type=pad_type)]
+        model += [Conv2dBlock(4*k, k, 3, 1, 1,
+                              norm='none',        # important
+                              activation='none',  # important
                               pad_type=pad_type)]
         self.model = nn.Sequential(*model)
 
     def forward(self, x):
-        residual = x
-        out = self.model(x)
-        out += residual
+        identity = x
+        res = self.model(x)
+        out = torch.cat([identity, res], dim=1)
         return out
+
+

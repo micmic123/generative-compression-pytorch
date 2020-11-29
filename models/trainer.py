@@ -59,6 +59,7 @@ class Trainer(nn.Module):
         self.is_mask = config['mask'] == 1
         self.C_level = config['C_level']
         self.has_controller = config['controller'] == 1
+        self.level_log = dict()
         assert not (self.is_mask and self.has_controller)
 
         encoder_params = list(self.model.encoder.parameters())
@@ -88,16 +89,36 @@ class Trainer(nn.Module):
     def G_update(self, x):
         self.encoder_opt.zero_grad()
         self.decoder_opt.zero_grad()
+
         if self.has_controller:
             self.controller_opt.zero_grad()
+            loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_grad, loss_match, loss_G, \
+            loss_recon_ls, loss_fm_ls, loss_G_adv_ls, loss_vgg_ls, loss_match_ls = self.model(x, 'G_update')  # , mask_size
+            self.level_log['loss_recon_level'] = {i: torch.mean(loss_recon_ls[i].detach()) for i in range(len(self.C_level))}
+            self.level_log['loss_fm_level'] = {i: torch.mean(loss_fm_ls[i].detach()) for i in range(len(self.C_level))}
+            self.level_log['loss_G_adv_level'] = {i: torch.mean(loss_G_adv_ls[i].detach()) for i in range(len(self.C_level))}
+            self.level_log['loss_vgg_level'] = {i: torch.mean(loss_vgg_ls[i].detach()) for i in range(len(self.C_level))}
+            if loss_match_ls:
+                self.level_log['loss_match_level'] = {i: torch.mean(loss_match_ls[i].detach()) for i in range(len(self.C_level)-1)}
+                self.loss_match = loss_match
+            else:
+                loss_match = None
 
-        loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_grad, loss_G = self.model(x, 'G_update')  # , mask_size
+        else:
+            loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_grad, loss_match, loss_G, \
+            loss_recon_ls, loss_fm_ls, loss_G_adv_ls, loss_vgg_ls, loss_match_ls = self.model(x, 'G_update')
+            loss_match = None
+
         self.loss_recon = torch.mean(loss_recon).detach()
         self.loss_fm = torch.mean(loss_fm).detach()
         self.loss_G_adv = torch.mean(loss_G_adv).detach()
         self.loss_vgg = torch.mean(loss_vgg).detach()
         self.loss_grad = torch.mean(loss_grad).detach()
         self.loss_G = torch.mean(loss_G).detach()
+
+        # for name in ['recon', 'fm', 'G_adv', 'vgg']:
+        #     for i in range(self.C_level):
+        #         getattr(self.model, f'loss_{name}_level{i}', loss_level)
         self.encoder_opt.step()
         self.decoder_opt.step()
 
@@ -109,11 +130,14 @@ class Trainer(nn.Module):
             update_average(model.controller_test, model.controller)
 
         return self.loss_recon.item(), self.loss_fm.item(), self.loss_G_adv.item(), self.loss_vgg, self.loss_grad, \
-               self.loss_G.item() #, mask_size
+               self.loss_G.item(), loss_match #, mask_size
 
     def D_update(self, x):
         self.dis_opt.zero_grad()
-        loss_D_real, loss_D_fake, loss_D = self.model(x, 'D_update')
+
+        loss_D_real, loss_D_fake, loss_D, loss_D_fake_ls = self.model(x, 'D_update')
+        if self.has_controller:
+            self.level_log['loss_D_fake'] = {i: torch.mean(loss_D_fake_ls[i].detach()) for i in range(len(self.C_level))}
         self.loss_D_real = torch.mean(loss_D_real).detach()
         self.loss_D_fake = torch.mean(loss_D_fake).detach()
         self.loss_D = torch.mean(loss_D).detach()
@@ -125,9 +149,9 @@ class Trainer(nn.Module):
         print('Forward function not implemented.')
         pass
 
-    def test(self, x):
+    def test(self, x, filename='test', verbose=True):
         model = self.model.module if self.multigpus else self.model
-        x, x_recon, x_recon_ema = model.test(x)
+        x, x_recon, x_recon_ema = model.test(x, filename, verbose)
         return x, x_recon, x_recon_ema
 
     def save(self, snapshot_dir, filename):

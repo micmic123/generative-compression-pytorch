@@ -1,5 +1,5 @@
 from torch import nn
-from .blocks import ResBlock, ResBlocks, Conv2dBlock, UpConv2dBlock
+from .blocks import ResBlock, ResBlocks, Conv2dBlock, ChannelResBlock
 
 
 class Controller(nn.Module):
@@ -51,3 +51,66 @@ class Controller(nn.Module):
             out.append(x)
 
         return out[::-1]  # ascending order for bpp
+
+
+class Controller2(nn.Module):
+    def __init__(self, config, q):
+        super(Controller2, self).__init__()
+        self.config = config
+        self.C_level = sorted(config['C_level'])  # ascending order
+        self.controller_q = config['controller_q'] == 1
+        self.q = q
+        for i in range(len(self.C_level)-1):
+            in_dim = self.C_level[i]
+            model = [
+                # nn.InstanceNorm2d(in_dim),
+                ChannelResBlock(in_dim, self.C_level[-1], norm='in', activation='relu', pad_type='reflect')
+            ]
+            setattr(self, f'model_{i}', nn.Sequential(*model))
+
+    def forward(self, z_quantized):
+        """
+        :param
+            z: (B, self.C_level[-1], H', W')
+        """
+        out = []
+        for i in range(len(self.C_level)-1):
+            x = z_quantized[:, :self.C_level[i]]
+            model = getattr(self, f'model_{i}')
+            x = model(x)
+            if self.controller_q:
+                x = self.q(x)
+            out.append(x)
+
+        return out
+
+    def forward_level(self, z, level):
+        """
+        :param
+            z: (B, self.C_level[level], H', W')
+        """
+        model = getattr(self, f'model_{level}')
+        return model(z)
+
+    def down(self, z_quantized):
+        """
+        :param
+            z_quantized: (B, C_level[-1], H', W')
+        """
+        out = []
+        for i in range(len(self.C_level) - 1):
+            out.append(z_quantized[:, :self.C_level[i]])
+        return out
+
+    def up(self, zs_quantized):
+        """
+        :param
+            zs: ascending order e.g. [(B, 8, 8, 16), (B, 32, 16, 16)]
+        """
+        out = []
+        for i, z in enumerate(zs_quantized):
+            z_up = self.forward_level(z, i)
+            if self.controller_q:
+                z_up = self.q(z_up)
+            out.append(z_up)
+        return out

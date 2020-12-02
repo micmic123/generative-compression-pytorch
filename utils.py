@@ -42,11 +42,15 @@ def compatible(config):
     if 'eval_itr' not in config:
         config['eval_itr'] = 1000
     if 'controller_v' not in config:
-        config['controller_v'] = 2
+        config['controller_v'] = 1
     if 'controller_q' not in config:
         config['controller_q'] = 0
     if 'match_w' not in config:
         config['match_w'] = 0
+    if 'full' not in config:
+        config['full'] = 0
+    if 'beta' not in config:
+        config['beta'] = 0.1
     return config
 
 
@@ -64,19 +68,29 @@ def get_eval_list(eval_path='./eval_samples/'):
 def eval_model(trainer, imgs):
     # imgs: list of tensor image
     psnrs, ms_ssims = [], []
+    psnrs_ema, ms_ssims_ema = [], []
     if trainer.has_controller:
         for x in imgs:
             x, x_recon, x_recon_ema = trainer.test(x, verbose=False)
             psnrs.append(PSNR(x, x_recon))
-            ms_ssims.append(MS_SSIM(x, x_recon_ema))
+            psnrs_ema.append(PSNR(x, x_recon_ema))
+            ms_ssims.append(MS_SSIM(x, x_recon))
+            ms_ssims_ema.append(MS_SSIM(x, x_recon_ema))
 
         psnrs = torch.stack(psnrs, dim=0).mean(dim=0).cpu()
+        psnrs_ema = torch.stack(psnrs_ema, dim=0).mean(dim=0).cpu()
         ms_ssims = torch.stack(ms_ssims, dim=0).mean(dim=0).cpu()
+        ms_ssims_ema = torch.stack(ms_ssims_ema, dim=0).mean(dim=0).cpu()
         trainer.level_log['PSNR'] = {i: torch.mean(psnrs[i].detach()) for i in range(len(trainer.C_level))}
+        trainer.level_log['PSNR_ema'] = {i: torch.mean(psnrs_ema[i].detach()) for i in range(len(trainer.C_level))}
         trainer.level_log['MS_SSIM'] = {i: torch.mean(ms_ssims[i].detach()) for i in range(len(trainer.C_level))}
+        trainer.level_log['MS_SSIM_ema'] = {i: torch.mean(ms_ssims_ema[i].detach()) for i in range(len(trainer.C_level))}
         psnr = [f'{p:.4f}' for p in psnrs]
+        psnr_ema = [f'{p:.4f}' for p in psnrs_ema]
         ms_ssim = [f'{p:.4f}' for p in ms_ssims]
+        ms_ssim_ema = [f'{p:.4f}' for p in ms_ssims_ema]
         print('eval: ', psnr, ms_ssim)
+        print('ema : ', psnr_ema, ms_ssim_ema)
     else:
         for x in imgs:
             x = x.cuda()
@@ -86,13 +100,24 @@ def eval_model(trainer, imgs):
             x_recon_ema = trainer.decode_ema(z_ema, shape=z_ema_shape)
 
             psnrs.append(PSNR(x, x_recon))
-            ms_ssims.append(MS_SSIM(x, x_recon_ema))
+            psnrs_ema.append(PSNR(x, x_recon_ema))
+            ms_ssims.append(MS_SSIM(x, x_recon))
+            ms_ssims_ema.append(MS_SSIM(x, x_recon_ema))
 
-        psnrs = torch.cat(psnrs, dim=0).mean(dim=0).cpu().detach()
-        ms_ssims = torch.cat(ms_ssims, dim=0).mean(dim=0).cpu().detach()
+        psnrs = torch.stack(psnrs, dim=0).mean(dim=0).cpu()
+        psnrs_ema = torch.stack(psnrs_ema, dim=0).mean(dim=0).cpu()
+        ms_ssims = torch.stack(ms_ssims, dim=0).mean(dim=0).cpu()
+        ms_ssims_ema = torch.stack(ms_ssims_ema, dim=0).mean(dim=0).cpu()
         trainer.eval_psnr = psnrs
+        trainer.eval_psnr_ema = psnrs_ema
         trainer.eval_ms_ssim = ms_ssims
-        print('eval: ', f'{psnrs.item():.4f}', f'{ms_ssims.item():.4f}')
+        trainer.eval_ms_ssim_ema = ms_ssims_ema
+        psnr = [f'{p:.4f}' for p in psnrs]
+        psnr_ema = [f'{p:.4f}' for p in psnrs_ema]
+        ms_ssim = [f'{p:.4f}' for p in ms_ssims]
+        ms_ssim_ema = [f'{p:.4f}' for p in ms_ssims_ema]
+        print('eval: ', psnr, ms_ssim)
+        print('ema : ', psnr_ema, ms_ssim_ema)
 
 
 def get_summary_writers(config, log_dir):
@@ -114,21 +139,26 @@ def write_loss(itr, model, writers, eval=False):
             if k == 'total': continue
             if eval:
                 writer.add_scalar('PSNR', model.level_log['PSNR'][k], itr)
+                writer.add_scalar('PSNR_ema', model.level_log['PSNR_ema'][k], itr)
                 writer.add_scalar('MS_SSIM', model.level_log['MS_SSIM'][k], itr)
+                writer.add_scalar('MS_SSIM_ema', model.level_log['MS_SSIM_ema'][k], itr)
             else:
-                writer.add_scalar('loss_recon_level', model.level_log['loss_recon_level'][k], itr)
-                writer.add_scalar('loss_fm_level', model.level_log['loss_fm_level'][k], itr)
-                writer.add_scalar('loss_vgg_level', model.level_log['loss_vgg_level'][k], itr)
-                writer.add_scalar('loss_G_adv_level', model.level_log['loss_G_adv_level'][k], itr)
+                writer.add_scalar('loss_recon', model.level_log['loss_recon_level'][k], itr)
+                writer.add_scalar('loss_fm', model.level_log['loss_fm_level'][k], itr)
+                writer.add_scalar('loss_vgg', model.level_log['loss_vgg_level'][k], itr)
+                writer.add_scalar('loss_grad', model.level_log['loss_grad_level'][k], itr)
+                writer.add_scalar('loss_G_adv', model.level_log['loss_G_adv_level'][k], itr)
                 writer.add_scalar('loss_D_fake', model.level_log['loss_D_fake'][k], itr)
                 if k < len(model.C_level)-1:
-                    writer.add_scalar('loss_match_level', model.level_log['loss_match_level'][k], itr)
+                    writer.add_scalar('loss_match', model.level_log['loss_match_level'][k], itr)
         writer = writers['total']
     else:
         writer = writers
         if eval:
             writer.add_scalar('PSNR', model.eval_psnr, itr)
+            writer.add_scalar('PSNR_ema', model.eval_psnr_ema, itr)
             writer.add_scalar('MS_SSIM', model.eval_ms_ssim, itr)
+            writer.add_scalar('MS_SSIM_ema', model.eval_ms_ssim_ema, itr)
             return
     members = [attr for attr in dir(model)
                if ((not callable(getattr(model, attr))

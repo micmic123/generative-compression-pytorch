@@ -15,12 +15,13 @@ lr_decoder: 0.0001            # learning rate for the generator
 lr_dis: 0.0001                # learning rate for the discriminator
 lr_controller: 0.0001
 lr_shedule_step: 400000
+beta: 0.1
 adv_w: 1                      # weight of adversarial loss for image translation
-fm_w: 5                       # weight on distance between gan features of style and translated image
+fm_w: 10                      # weight on distance between gan features of style and translated image
 recon_w: 10                   # weight of image reconstruction loss
 vgg_w: 10
 grad_w: 0
-match_w: 1
+match_w: 0
 
 downscale_factor: 4
 
@@ -50,3 +51,4 @@ batchsize_test: 4
 image_num: 0
 image_shape: [3, 256, 256]
 worker_num: 2
+full: 1

@@ -93,16 +93,24 @@ base_transform = transforms.Compose([
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))  # normalize to [-1, 1]
 ])
 
+full_transform = transforms.Compose([
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))  # normalize to [-1, 1]
+])
 
 inference_transform = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))  # normalize to [-1, 1]
 ])
 
+
 def get_dataloader(config):
     data_transforms = {
         'train': base_transform
     }
+    if config['full'] == 1:
+        data_transforms['train'] = full_transform
 
     train_dataset = OpenImageDataset(config['trainset'], data_transforms['train'], mode='train')
     train_dataloader = DataLoader(train_dataset, batch_size=config['batchsize'], shuffle=True, num_workers=config['worker_num'])

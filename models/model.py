@@ -154,7 +154,11 @@ class Model(nn.Module):
         # image gradient loss
         x_grad = self.scharr(x)
         x_recon_grad = self.scharr(x_recon)
-        loss_grad = self.criterion(x_grad, x_recon_grad).mean()
+        if self.has_controller:
+            loss_grad_tmp = torch.mean(self.criterion(x_grad, x_recon_grad), dim=[1, 2, 3])  # (B*(len(C_Level)), )
+            loss_grad, loss_grad_ls = self.levelwise_loss(loss_grad_tmp, 'grad', batchsize)
+        else:
+            loss_grad = self.criterion(x_grad, x_recon_grad)
 
         # adversarial loss
         if self.has_controller:
@@ -164,7 +168,7 @@ class Model(nn.Module):
             loss_G_adv, loss_G_adv_ls = self.levelwise_loss(loss_G_adv_tmp, 'G_adv', batchsize)
         else:
             loss_G_adv = torch.mean(torch.stack([self.criterion(score, torch.ones_like(score)) for score in score_recon]))
-            loss_recon_ls, loss_fm_ls, loss_G_adv_ls, loss_vgg_ls = None, None, None, None
+            loss_recon_ls, loss_fm_ls, loss_G_adv_ls, loss_vgg_ls, loss_grad_ls = None, None, None, None, None
 
         loss_G = self.config['recon_w']*loss_recon + self.config['fm_w']*loss_fm + \
                  self.config['adv_w']*loss_G_adv + self.config['vgg_w']*loss_vgg + \
@@ -173,7 +177,7 @@ class Model(nn.Module):
         loss_G.backward()
 
         return loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_grad, loss_match, \
-               loss_G, loss_recon_ls, loss_fm_ls, loss_G_adv_ls, loss_vgg_ls, loss_match_ls  # , mask_size
+               loss_G, loss_recon_ls, loss_fm_ls, loss_G_adv_ls, loss_vgg_ls, loss_match_ls, loss_grad_ls  # , mask_size
 
     def D_update(self, x):
         batchsize = x.shape[0]

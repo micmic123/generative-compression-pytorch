@@ -72,13 +72,24 @@ for path in paths:
     if config['controller']:
         x, x_recon, x_recon_ema = model.test(x, filename=filename)
         out = torch.cat([x.detach(), x_recon.detach(), x_recon_ema.detach()], dim=0)
-        save_grid(out, os.path.join(example_dir, f'{filename}_{model.itr:08}_grid.png'), nrow=4)
+        save_grid(out, os.path.join(example_dir, f'{filename}_{model.itr:08}_grid.png'), nrow=len(model.C_level))
         psnr = PSNR(x, x_recon)
-        ms_ssim = MS_SSIM(x, x_recon_ema)
+        psnr_ema = PSNR(x, x_recon_ema)
+        ms_ssim = MS_SSIM(x, x_recon)
+        ms_ssim_ema = MS_SSIM(x, x_recon_ema)
 
         psnr = [f'{p:.4f}' for p in psnr]
+        psnr_ema = [f'{p:.4f}' for p in psnr_ema]
         ms_ssim = [f'{p:.4f}' for p in ms_ssim]
-        print(psnr, ms_ssim)
+        ms_ssim_ema = [f'{p:.4f}' for p in ms_ssim_ema]
+
+        print(f'[{os.path.basename(path):>{fiename_maxlen}}] ')
+        print('eval: ', psnr, ms_ssim)
+        print('ema : ', psnr_ema, ms_ssim_ema)
+        for i, (xr_level, xr_level_ema) in enumerate(zip(x_recon, x_recon_ema)):
+            save_image(xr_level.detach(), os.path.join(example_dir, f'{filename}_{model.itr:08}_level{i}.png'))
+            save_image(xr_level_ema.detach(), os.path.join(example_dir, f'{filename}_{model.itr:08}_level{i}_ema.png'))
+
     else:
         x = x.cuda()
 
@@ -106,10 +117,12 @@ for path in paths:
             z_ema_dict[k] = round(z_ema_dict[k] / np.prod(z_shape), 2)
 
         psnr = PSNR(x, x_recon)
-        ms_ssim = MS_SSIM(x, x_recon_ema)
+        psnr_ema = PSNR(x, x_recon_ema)
+        ms_ssim = MS_SSIM(x, x_recon)
+        ms_ssim_ema = MS_SSIM(x, x_recon_ema)
         print(f'[{os.path.basename(path):>{fiename_maxlen}}] '
               f'{len(z):6}B {bpp:.4f}bpp {psnr[0]:.4f}, {ms_ssim[0]:.4f}' # {str(z_dict):>47}, '
-              f'{len(z_ema):6}B {bpp_ema:.4f}bpp, {psnr[0]:.4f}, {ms_ssim[0]:.4f} ' # {str(z_ema_dict):>47} '
+              f'{len(z_ema):6}B {bpp_ema:.4f}bpp, {psnr_ema[0]:.4f}, {ms_ssim_ema[0]:.4f} ' # {str(z_ema_dict):>47} '
               f'({elapsed_t:>.4f}s)')
 
         save_image(x_recon.squeeze().detach(), os.path.join(example_dir, f'{filename}_{model.itr:08}_{bpp}.png'))

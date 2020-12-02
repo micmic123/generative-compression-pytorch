@@ -10,7 +10,7 @@ from models.trainer import Trainer
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--config', help='config file path', type=str)
-parser.add_argument('--name', help='result dir name', default=datetime.now().strftime("%Y-%m-%d_%H_%M_%S"), type=str)
+parser.add_argument('--name', help='result dir name', default=datetime.now().strftime('%Y-%m-%d_%H_%M_%S'), type=str)
 parser.add_argument('--device', help='CUDA_VISIBLE_DEVICES number', default='3', type=str)
 parser.add_argument('--resume', help='snapshot path', type=str)
 parser.add_argument('--multigpus', type=str, default='')
@@ -54,6 +54,7 @@ trainer = Trainer(config)
 trainer.cuda()
 if args.resume:
     trainer.load(args.resume)
+    print(f'encoder_opt lr: {trainer.encoder_opt.param_groups[0]["lr"]}')
 
 if args.multigpus:
     ngpus = torch.cuda.device_count()
@@ -79,11 +80,23 @@ while True:
         trainer.itr += 1
 
         if trainer.itr % config['lr_shedule_step'] == 0:
-            lr_schedule(trainer.encoder_opt, config['lr_encoder'])
-            lr_schedule(trainer.decoder_opt, config['lr_decoder'])
-            lr_schedule(trainer.dis_opt, config['lr_dis'])
+            print('[ Info ] learning rate scheduling!')
+            print('Before:')
+            print(f'* encoder_opt {trainer.encoder_opt.param_groups[0]["lr"]}')
+            print(f'* decoder_opt {trainer.decoder_opt.param_groups[0]["lr"]}')
+            print(f'* dis_opt {trainer.dis_opt.param_groups[0]["lr"]} **')
+            lr_schedule(trainer.encoder_opt, config['lr_encoder'], beta=config['beta'])
+            lr_schedule(trainer.decoder_opt, config['lr_decoder'], beta=config['beta'])
+            lr_schedule(trainer.dis_opt, config['lr_dis'], beta=config['beta'])
             if trainer.has_controller:
-                lr_schedule(trainer.controller_opt, config['lr_dis'])
+                print(f'* controller_opt {trainer.controller_opt.param_groups[0]["lr"]}')
+                lr_schedule(trainer.controller_opt, config['lr_controller'], beta=config['beta'])
+            print('After: ')
+            print(f'* encoder_opt {trainer.encoder_opt.param_groups[0]["lr"]}')
+            print(f'* decoder_opt {trainer.decoder_opt.param_groups[0]["lr"]}')
+            print(f'* dis_opt {trainer.dis_opt.param_groups[0]["lr"]} **')
+            if trainer.has_controller:
+                print(f'* controller_opt {trainer.controller_opt.param_groups[0]["lr"]}')
 
         if trainer.itr % config['log_itr'] == 0:
             write_loss(trainer.itr, trainer, summary_writers)

@@ -93,11 +93,12 @@ class Trainer(nn.Module):
         if self.has_controller:
             self.controller_opt.zero_grad()
             loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_grad, loss_match, loss_G, \
-            loss_recon_ls, loss_fm_ls, loss_G_adv_ls, loss_vgg_ls, loss_match_ls = self.model(x, 'G_update')  # , mask_size
+            loss_recon_ls, loss_fm_ls, loss_G_adv_ls, loss_vgg_ls, loss_match_ls, loss_grad_ls = self.model(x, 'G_update')  # , mask_size
             self.level_log['loss_recon_level'] = {i: torch.mean(loss_recon_ls[i].detach()) for i in range(len(self.C_level))}
             self.level_log['loss_fm_level'] = {i: torch.mean(loss_fm_ls[i].detach()) for i in range(len(self.C_level))}
             self.level_log['loss_G_adv_level'] = {i: torch.mean(loss_G_adv_ls[i].detach()) for i in range(len(self.C_level))}
             self.level_log['loss_vgg_level'] = {i: torch.mean(loss_vgg_ls[i].detach()) for i in range(len(self.C_level))}
+            self.level_log['loss_grad_level'] = {i: torch.mean(loss_grad_ls[i].detach()) for i in range(len(self.C_level))}
             if loss_match_ls:
                 self.level_log['loss_match_level'] = {i: torch.mean(loss_match_ls[i].detach()) for i in range(len(self.C_level)-1)}
                 self.loss_match = loss_match
@@ -106,7 +107,7 @@ class Trainer(nn.Module):
 
         else:
             loss_recon, loss_fm, loss_G_adv, loss_vgg, loss_grad, loss_match, loss_G, \
-            loss_recon_ls, loss_fm_ls, loss_G_adv_ls, loss_vgg_ls, loss_match_ls = self.model(x, 'G_update')
+            loss_recon_ls, loss_fm_ls, loss_G_adv_ls, loss_vgg_ls, loss_match_ls, loss_grad_ls = self.model(x, 'G_update')
             loss_match = None
 
         self.loss_recon = torch.mean(loss_recon).detach()
